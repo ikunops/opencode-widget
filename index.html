@@ -5,7 +5,7 @@
 <title>Go 用量</title>
 <style>
   :root {
-    --alpha: 0.3;
+    --alpha: 0.7;
     --bg: rgba(13, 17, 28, var(--alpha));
     --panel: rgba(22, 28, 42, calc(var(--alpha) + 0.04));
     --panel-2: rgba(26, 33, 50, calc(var(--alpha) + 0.06));
@@ -173,7 +173,7 @@
     <div style="display:flex;align-items:center;gap:10px">
       <div class="op-wrap">
         <span class="op-label" id="opLabel">30%</span>
-        <input type="range" id="opSlider" min="10" max="100" value="30" title="???">
+        <input type="range" id="opSlider" min="10" max="100" value="70" title="透明度">
       </div>
       <div class="status"><span class="dot" id="keyDot"></span><span id="keyText">…</span></div>
       <div class="win-btns">
@@ -190,13 +190,13 @@
       <div class="c-top">
         <div class="ringbox">
           <svg viewBox="0 0 118 118">
-            <circle class="ring ring-track" cx="59" cy="59" r="52"/>
-            <circle class="ring ring-track" cx="59" cy="59" r="41"/>
             <circle class="ring ring-track" cx="59" cy="59" r="28"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="41"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="52"/>
             <circle class="ring ring-badge" cx="59" cy="59" r="18"/>
-            <circle class="ring r0" id="ring0" cx="59" cy="59" r="52"/>
+            <circle class="ring r0" id="ring0" cx="59" cy="59" r="28"/>
             <circle class="ring r1" id="ring1" cx="59" cy="59" r="41"/>
-            <circle class="ring r2" id="ring2" cx="59" cy="59" r="28"/>
+            <circle class="ring r2" id="ring2" cx="59" cy="59" r="52"/>
           </svg>
           <div class="rc">
             <span class="label" id="cLabel">总用量</span>
@@ -321,7 +321,7 @@ const countdown = (ms) => {
 const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];
 const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
 const RING_KEYS = ["session", "weekly", "monthly"];
-const RING_R = [52, 41, 28];
+const RING_R = [28, 41, 52];
 const COMPACT_H = 480, EXPAND_H = 640;
 
 let state = { windows: [], stats: [], history: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
@@ -343,7 +343,7 @@ function fmtCost(v) {
   return "$" + (v >= 1 ? v.toFixed(2) : (v >= 0.01 ? v.toFixed(3) : v.toFixed(4)));
 }
 function modelValue(x, key) {
-  if (mUnit === "token") return x.tokens_in + x.tokens_out;
+  if (mUnit === "token") return (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0);
   return x[key] || 0;
 }
 
@@ -367,7 +367,7 @@ function setRing(i, pct) {
 }
 function ringColor(pct) { return pct >= 95 ? "#ef4444" : pct >= 70 ? "#f59e0b" : RING_COLORS[0]; }
 function periodName(kind) { return PERIODS[RING_KEYS.indexOf(kind)][0]; }
-function modelKey() { return { session: "count_s", weekly: "count_w", monthly: "count_m" }[state.mode] || "count_s"; }
+function modelKey() { return { overview: "count_m", session: "count_s", weekly: "count_w", monthly: "count_m" }[state.mode] || "count_m"; }
 
 function render() {
   try {
@@ -445,19 +445,32 @@ function fillModelList(el, key) {
   el.innerHTML = "";
   const stats = filteredStats();
   const sorted = [...stats].sort((a, b) => modelValue(b, key) - modelValue(a, key));
-  const max = Math.max(1, ...sorted.map(x => modelValue(x, key)));
+  const total = sorted.reduce((a, x) => a + modelValue(x, key), 0) || 1;
+  const mode = state.mode === "overview" ? "monthly" : state.mode === "weekly" || state.mode === "monthly" ? state.mode : "session";
+  const quotaWin = win(mode);
+  const quotaLimit = (quotaWin && quotaWin.limit) || 60;
+  const costOf = x => mode === "weekly" ? (x.cost_w || 0) : mode === "monthly" ? (x.cost_m || 0) : (x.cost_s || 0);
   sorted.forEach(x => {
     const div = document.createElement("div");
     const mKey = x.key || x.model;
     div.className = "m-item" + (selModel === mKey ? " sel" : "") + (x.group === "free" ? " free" : "");
     const val = modelValue(x, key);
     const isTok = mUnit === "token";
+    const isQuota = x.group === "go" && !isTok;
     const main = isTok ? fmtTokens(val) : val + "次";
-    const extra = x.group === "free"
-      ? (isTok ? val + " tok" : fmtTokens(x.tokens_in + x.tokens_out) + " tok")
-      : fmtCost(x.cost_total);
-    const rem = (!isTok && x.req_lim) ? `<span class="rem">剩${Math.max(0, x.req_lim[0] - (x[key] || 0))}</span>` : "";
-    div.innerHTML = `<span class="nm" title="${x.model}">${x.name}</span><span class="bar"><i style="width:${Math.min(100, val / max * 100)}%"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
+    let barPct, extra;
+    if (isQuota) {
+      const c = costOf(x);
+      barPct = Math.min(100, c / quotaLimit * 100);
+      extra = `${fmtCost(c)}/${fmtCost(quotaLimit)}`;
+    } else {
+      barPct = Math.min(100, val / total * 100);
+      extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
+    }
+    const limIdx = mode === "weekly" ? 1 : mode === "monthly" ? 2 : 0;
+    const rem = (!isTok && x.req_lim) ? `<span class="rem">剩${Math.max(0, x.req_lim[limIdx] - (x[key] || 0))}</span>` : "";
+    const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
+    div.innerHTML = `<span class="nm" title="${x.model}">${x.name}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
     div.onclick = () => { selModel = selModel === mKey ? null : mKey; render(); };
     el.appendChild(div);
   });
@@ -502,10 +515,10 @@ function renderChart() {
   const item = state.history.find(h => (h.key || h.model) === selModel);
   if (!item || !item.series.length) { svg.innerHTML = ""; $("#dChartTitle").textContent = "暂无历史数据"; return; }
   const isFree = !!item.is_free;
-  if (note) note.textContent = isFree ? "近 14 天 Token(输入+输出)" : "近 14 天费用(USD)";
+  if (note) note.textContent = isFree ? "近 14 天 Token(含缓存)" : "近 14 天费用(USD)";
   const pts = item.series;
   const W = 300, H = 150, PAD_L = 36, PAD_B = 16, PAD_T = 8, PAD_R = 8;
-  const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out) : p.cost);
+  const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out + p.tokens_cache) : p.cost);
   const maxV = Math.max(...vals, isFree ? 1 : 0.0001);
   const stepX = (W - PAD_L - PAD_R) / Math.max(1, pts.length - 1);
   const y = (v) => H - PAD_B - (v / maxV) * (H - PAD_T - PAD_B);
@@ -540,7 +553,7 @@ function renderStats() {
   const st = filteredStats();
   const totalReq = st.reduce((a, x) => a + (x[key] || 0), 0);
   const totalCost = st.reduce((a, x) => a + x.cost_s, 0);
-  const totalTok = st.reduce((a, x) => a + (x.tokens_in || 0) + (x.tokens_out || 0), 0);
+  const totalTok = st.reduce((a, x) => a + (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0), 0);
   [["请求数", totalReq + " 次"], ["5h费用", money(totalCost)], ["模型数", st.length + " 个"]].forEach(([k, v]) => {
     const div = document.createElement("div");
     div.className = "s-chip";
@@ -605,9 +618,10 @@ function applyOpacity(v) {
 }
 async function initOpacity() {
   try {
+    if (!window.pywebview || !window.pywebview.api) { setTimeout(initOpacity, 500); return; }
     const v = await window.pywebview.api.get_opacity();
-    applyOpacity(v || 0.3);
-  } catch (_) { applyOpacity(0.3); }
+    applyOpacity(v || 0.7);
+  } catch (_) { setTimeout(initOpacity, 500); }
 }
 document.addEventListener("DOMContentLoaded", () => {
   const sl = document.getElementById("opSlider");

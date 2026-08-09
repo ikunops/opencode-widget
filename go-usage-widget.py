@@ -295,7 +295,8 @@ def model_stats(rows, now_ms, cost_map=None):
         key = (m, src) if free else (m, "go")
         if key not in stats:
             stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
-                          "tokens_in": 0, "tokens_out": 0, "cost_total": 0.0}
+                          "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
+                          "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0}
         s = stats[key]
         if session_start <= r["ts"] < now_ms:
             s["count_s"] += 1
@@ -303,11 +304,17 @@ def model_stats(rows, now_ms, cost_map=None):
                 s["cost_s"] += r["cost"]
         if ws <= r["ts"] < we:
             s["count_w"] += 1
+            if r["cost"] is not None:
+                s["cost_w"] += r["cost"]
         if ms <= r["ts"] < me:
             s["count_m"] += 1
+            if r["cost"] is not None:
+                s["cost_m"] += r["cost"]
         tk = r.get("tokens") or {}
         s["tokens_in"] += tk.get("input", 0) or 0
         s["tokens_out"] += tk.get("output", 0) or 0
+        cache = tk.get("cache") or {}
+        s["tokens_cache"] += (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
         if r["cost"] is not None:
             s["cost_total"] += r["cost"]
 
@@ -325,6 +332,7 @@ def model_stats(rows, now_ms, cost_map=None):
             name = f"{name} ({src})"
         if not is_free and m in cost_map:
             s["cost_total"] = cost_map[m]
+            s["cost_m"] = cost_map[m]
         out.append({
             "model": m,
             "source": src,
@@ -333,8 +341,10 @@ def model_stats(rows, now_ms, cost_map=None):
             "group": group,
             "name": name,
             "count_s": s["count_s"], "count_w": s["count_w"], "count_m": s["count_m"],
-            "cost_s": s["cost_s"], "cost_total": s["cost_total"],
+            "cost_s": s["cost_s"], "cost_w": s["cost_w"], "cost_m": s["cost_m"],
+            "cost_total": s["cost_total"],
             "tokens_in": s["tokens_in"], "tokens_out": s["tokens_out"],
+            "tokens_cache": s["tokens_cache"],
             "req_lim": REQ_LIMITS.get(m),
         })
     out.sort(key=lambda x: -x["count_s"])
@@ -353,12 +363,14 @@ def model_history(rows, days=14):
         src = r.get("src") or "?"
         free = is_free_model(m)
         key = (m, src) if free else (m, "go")
-        b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0])
+        b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
         b[0] += r["cost"] if r["cost"] is not None else 0.0
         b[1] += 1
         tk = r.get("tokens") or {}
         b[2] += tk.get("input", 0) or 0
         b[3] += tk.get("output", 0) or 0
+        cache = tk.get("cache") or {}
+        b[4] += (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
 
     src_count = {}
     for (m, src) in buckets:
@@ -368,7 +380,7 @@ def model_history(rows, days=14):
     out = []
     for (m, src), days_map in buckets.items():
         series = [{"date": k, "cost": round(v[0], 4), "count": v[1],
-                   "tokens_in": v[2], "tokens_out": v[3]}
+                   "tokens_in": v[2], "tokens_out": v[3], "tokens_cache": v[4]}
                   for k, v in sorted(days_map.items())]
         name = DISPLAY_NAMES.get(m, m)
         if is_free_model(m) and src_count.get(m, 0) > 1:
@@ -694,7 +706,7 @@ class Api:
         return True
 
     def get_opacity(self):
-        return self.cfg.get("opacity", 0.3)
+        return self.cfg.get("opacity", 0.7)
 
     def save_opacity(self, v):
         val = max(0.1, min(1.0, float(v)))
@@ -707,6 +719,7 @@ class Api:
 
     def open_console(self):
         try:
+            self._ensure_console()
             if self._console_win is not None:
                 self._console_win.restore()
                 self._console_win.move(240, 80)
@@ -720,10 +733,33 @@ class Api:
             pass
         return "no_window"
 
+    def _ensure_console(self):
+        """按需创建 Console 窗口 (懒加载)，避免启动时闪出。"""
+        if self._console_win is not None:
+            return
+        try:
+            import webview
+            self._console_win = webview.create_window(
+                "Go Console",
+                "https://opencode.ai/auth",
+                width=980,
+                height=760,
+                x=200,
+                y=60,
+                on_top=False,
+                hidden=True,
+                transparent=True,
+                easy_drag=False,
+                background_color="#000000",
+            )
+        except Exception:
+            self._console_win = None
+
     def grab_cookie(self):
         auth_val = read_auth_cookie_from_webdata()
         source = "webdata"
         if not auth_val:
+            self._ensure_console()
             if self._console_win is None:
                 return {"ok": False, "error": "Console 窗口未创建"}
             try:
@@ -830,21 +866,6 @@ def main():
         background_color="#000000",
     )
     api.set_window(win)
-
-    console_win = webview.create_window(
-        "Go Console",
-        "https://opencode.ai/auth",
-        width=980,
-        height=760,
-        x=200,
-        y=60,
-        on_top=False,
-        hidden=True,
-        transparent=True,
-        easy_drag=False,
-        background_color="#000000",
-    )
-    api._console_win = console_win
 
     def boot():
         threading.Thread(target=api._verify_key, daemon=True).start()
