@@ -140,10 +140,12 @@ def est_cost(model, tokens):
     return cost / 1_000_000
 
 
-def read_opencode_all():
+def read_opencode_all(srcs=None):
     rows = []
     if not os.path.exists(OPENCODE_DB):
         return rows
+    if srcs:
+        srcs = set(srcs)
     try:
         conn = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True, timeout=15)
         cur = conn.execute(
@@ -157,6 +159,8 @@ def read_opencode_all():
                 continue
             src = PROVIDER_SRC.get(d.get("providerID"))
             if not src:
+                continue
+            if srcs is not None and src not in srcs:
                 continue
             t = (d.get("time") or {}).get("created")
             if not t:
@@ -278,7 +282,8 @@ def build_windows(rows, now_ms):
     ]
 
 
-def model_stats(rows, now_ms):
+def model_stats(rows, now_ms, cost_map=None):
+    cost_map = cost_map or {}
     stats = {}
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
@@ -286,7 +291,8 @@ def model_stats(rows, now_ms):
     for r in rows:
         m = r["model"]
         src = r.get("src") or "?"
-        key = (m, src)
+        free = is_free_model(m)
+        key = (m, src) if free else (m, "go")
         if key not in stats:
             stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
                           "tokens_in": 0, "tokens_out": 0, "cost_total": 0.0}
@@ -317,6 +323,8 @@ def model_stats(rows, now_ms):
         name = DISPLAY_NAMES.get(m, m)
         if is_free and src_count.get(m, 0) > 1:
             name = f"{name} ({src})"
+        if not is_free and m in cost_map:
+            s["cost_total"] = cost_map[m]
         out.append({
             "model": m,
             "source": src,
@@ -343,7 +351,8 @@ def model_history(rows, days=14):
         d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%m-%d")
         m = r["model"]
         src = r.get("src") or "?"
-        key = (m, src)
+        free = is_free_model(m)
+        key = (m, src) if free else (m, "go")
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0])
         b[0] += r["cost"] if r["cost"] is not None else 0.0
         b[1] += 1
@@ -527,21 +536,43 @@ class Api:
         self._win = win
 
     def refresh_data(self):
-        go_rows = read_opencode_all()
-        cx_rows, new_id = read_codex_logs(self.last_log_id)
+        now_ms = int(time.time() * 1000)
+        rows, cost_map = self._collect_rows()
         with self.lock:
-            if new_id > self.last_log_id:
-                self.last_log_id = new_id
-                self.cfg["codex_log_id"] = new_id
-                save_config(self.cfg)
-            self.rows = go_rows + cx_rows
-            now_ms = int(time.time() * 1000)
+            self.rows = rows
             self.windows = build_windows(self.rows, now_ms)
             self._apply_calibration(self.windows, now_ms)
-            self.stats = model_stats(self.rows, now_ms)
+            self.stats = model_stats(self.rows, now_ms, cost_map)
             self.history = model_history(self.rows)
             self.last_refresh = now_ms
         self._try_server_sync()
+
+    def _collect_rows(self):
+        """收集行数据。服务器数据可用时: go 组以服务器 usage_records 为权威 (含 VS Code/Codex/所有 agent),
+        本地 opencode.db 仅补充 kilo (服务器无)。服务器不可用时回退本地 + codex 日志。"""
+        srv_rows = []
+        try:
+            import server_data as sd
+            srv_rows = sd.read_server_rows()
+        except Exception:
+            pass
+        if srv_rows:
+            cost_map = {}
+            try:
+                import server_data as sd
+                cost_map = sd.read_cost_map()
+            except Exception:
+                pass
+            kilo_rows = read_opencode_all(srcs={"kilo"})
+            return srv_rows + kilo_rows, cost_map
+
+        go_rows = read_opencode_all()
+        cx_rows, new_id = read_codex_logs(self.last_log_id)
+        if new_id > self.last_log_id:
+            self.last_log_id = new_id
+            self.cfg["codex_log_id"] = new_id
+            save_config(self.cfg)
+        return go_rows + cx_rows, {}
 
     def _apply_calibration(self, windows, now_ms):
         cal = self.cfg.get("calibration") or {}
@@ -581,7 +612,7 @@ class Api:
             try:
                 import server_data as sd
                 windows = usage_res.get("windows") if usage_res and usage_res.get("ok") else None
-                sd.sync_all(cookie, ws, windows=windows, max_pages=20)
+                sd.sync_all(cookie, ws, windows=windows, max_pages=130)
             except Exception:
                 pass
 

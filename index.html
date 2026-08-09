@@ -83,7 +83,9 @@
   .tab.active { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; font-weight: 600; }
 
   .models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .m-head { display: flex; justify-content: space-between; align-items: center; gap: 5px; padding: 2px 0 4px; flex-shrink: 0; }
+  .m-head { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 6px; flex-shrink: 0; }
+  .m-head-top { display: flex; justify-content: space-between; align-items: center; }
+  .m-head-bar { display: flex; justify-content: space-between; align-items: center; }
   .m-title { font-size: 10px; color: var(--faded); letter-spacing: 1px; flex-shrink: 0; }
   .m-count { font-size: 10px; color: var(--dim); flex-shrink: 0; }
   .m-filters { display: flex; gap: 2px; background: rgba(255,255,255,0.05); border-radius: 7px; padding: 2px; flex-shrink: 0; }
@@ -207,14 +209,18 @@
       <div class="c-tabs" id="cTabs"></div>
       <div class="models">
         <div class="m-head">
-          <span class="m-title">模型用量</span>
-          <div class="m-filters" id="cFilters">
-            <button class="f-btn on" data-f="all">全部</button>
-            <button class="f-btn" data-f="go">go</button>
-            <button class="f-btn" data-f="free">free</button>
+          <div class="m-head-top">
+            <span class="m-title">模型用量</span>
+            <span class="m-count" id="cCount"></span>
           </div>
-          <button class="unit-btn" id="cUnitBtn" title="切换 次数/Token">次数</button>
-          <span class="m-count" id="cCount"></span>
+          <div class="m-head-bar">
+            <div class="m-filters" id="cFilters">
+              <button class="f-btn on" data-f="all">全部</button>
+              <button class="f-btn" data-f="go">go</button>
+              <button class="f-btn" data-f="free">free</button>
+            </div>
+            <button class="unit-btn" id="cUnitBtn" title="切换 次数/Token">次数</button>
+          </div>
         </div>
         <div class="m-list" id="cList"></div>
       </div>
@@ -226,14 +232,18 @@
       <div class="d-body">
         <div class="d-left">
           <div class="m-head">
-            <span class="m-title">模型用量</span>
-            <div class="m-filters" id="dFilters">
-              <button class="f-btn on" data-f="all">全部</button>
-              <button class="f-btn" data-f="go">go</button>
-              <button class="f-btn" data-f="free">free</button>
+            <div class="m-head-top">
+              <span class="m-title">模型用量</span>
+              <span class="m-count" id="dCount"></span>
             </div>
-            <button class="unit-btn" id="dUnitBtn" title="切换 次数/Token">次数</button>
-            <span class="m-count" id="dCount"></span>
+            <div class="m-head-bar">
+              <div class="m-filters" id="dFilters">
+                <button class="f-btn on" data-f="all">全部</button>
+                <button class="f-btn" data-f="go">go</button>
+                <button class="f-btn" data-f="free">free</button>
+              </div>
+              <button class="unit-btn" id="dUnitBtn" title="切换 次数/Token">次数</button>
+            </div>
           </div>
           <div class="m-list" id="dList"></div>
         </div>

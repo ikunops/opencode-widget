@@ -343,8 +343,62 @@ def store_quota_snapshot(conn, windows, workspace_id, fetched_at):
     return n
 
 
-def sync_all(auth_cookie, workspace_id, windows=None, year=None, month=None, max_pages=20):
-    """一次性同步: usage.list 增量 + getCosts 当月 + 配额快照。返回结果摘要 dict。"""
+def read_server_rows():
+    """读取 usage_records 全部明细，转成与本地 rows 相同的结构。
+    返回 [{ts, cost(USD), model, tokens, src, key_id}]，cost 已从 1e8 原始单位换算为美元。"""
+    if not os.path.exists(DB_PATH):
+        return []
+    rows = []
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        cur = conn.execute(
+            "SELECT time_created, model, provider, input_tokens, output_tokens, reasoning_tokens, "
+            "cache_read_tokens, cache_write_5m_tokens, cache_write_1h_tokens, cost, key_id "
+            "FROM usage_records")
+        for (ts, model, provider, tin, tout, treas, tcr, tcw5, tcw1, cost, key_id) in cur:
+            if not ts or not model:
+                continue
+            tokens = {
+                "input": tin or 0,
+                "output": tout or 0,
+                "cache": {"read": tcr or 0, "write": (tcw5 or 0) + (tcw1 or 0)},
+                "reasoning": treas or 0,
+            }
+            src = "go" if (provider or "").startswith("inf-go") else "zen"
+            rows.append({
+                "ts": ts,
+                "cost": (cost or 0) / 1e8,
+                "model": model,
+                "tokens": tokens,
+                "src": src,
+                "key_id": key_id or "",
+            })
+        conn.close()
+    except Exception:
+        pass
+    return rows
+
+
+def read_cost_map():
+    """从 cost_summary 读取整月权威成本（跨 key 合并）: {model: usd}。"""
+    if not os.path.exists(DB_PATH):
+        return {}
+    cm = {}
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        for model, total in conn.execute(
+                "SELECT model, SUM(total_cost) FROM cost_summary GROUP BY model").fetchall():
+            cm[model] = (total or 0) / 1e8
+        conn.close()
+    except Exception:
+        pass
+    return cm
+
+
+def sync_all(auth_cookie, workspace_id, windows=None, year=None, month=None, max_pages=130, full=False):
+    """一次性同步: usage.list 增量 + getCosts 当月 + 配额快照。返回结果摘要 dict。
+    max_pages 默认 130: 首次全量回填 (服务器窗口约 124 页), 之后依赖 known_ids 增量提前停止。
+    full=True 时忽略 known_ids 强制翻到服务器尽头, 用于补齐历史缺口。"""
     result = {"usage_list": 0, "costs": 0, "quota": 0, "errors": []}
     if not auth_cookie or not workspace_id:
         result["errors"].append("缺少 auth cookie 或 workspace ID")
@@ -353,7 +407,7 @@ def sync_all(auth_cookie, workspace_id, windows=None, year=None, month=None, max
     fetched_at = int(time.time() * 1000)
     try:
         records, err = fetch_usage_list(auth_cookie, workspace_id, max_pages=max_pages,
-                                        known_ids=known_ids(conn))
+                                        known_ids=None if full else known_ids(conn))
         if err:
             result["errors"].append(err)
         else:
