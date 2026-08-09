@@ -4,3 +4,6 @@ logs/
 __pycache__/
 *.log
 server_usage.db
+
+# 第三方依赖库（本地打包的 pywebview/pythonnet 等，不纳入版本控制）
+pylib/
