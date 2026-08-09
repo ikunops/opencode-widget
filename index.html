@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Go 用量</title>
+<style>
+  :root {
+    --alpha: 0.3;
+    --bg: rgba(13, 17, 28, var(--alpha));
+    --panel: rgba(22, 28, 42, calc(var(--alpha) + 0.04));
+    --panel-2: rgba(26, 33, 50, calc(var(--alpha) + 0.06));
+    --border: rgba(255, 255, 255, 0.08);
+    --border-light: rgba(255, 255, 255, 0.14);
+    --text: #e8ebf4;
+    --dim: #8a93a6;
+    --faded: #5a6478;
+    --accent: #6366f1;
+    --violet: #a855f7;
+    --cyan: #22d3ee;
+    --green: #22c55e;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --track: rgba(255, 255, 255, 0.06);
+    --radius: 18px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif; }
+  .app {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    border-radius: var(--radius);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .app::before { content: ""; position: absolute; inset: 0; border-radius: var(--radius); border: 1px solid var(--border-light); pointer-events: none; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px 5px; -webkit-app-region: drag; flex-shrink: 0; }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .mark { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--violet)); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700; }
+  .title { font-size: 13px; font-weight: 700; color: var(--text); }
+  .status { font-size: 10px; color: var(--dim); display: flex; align-items: center; gap: 5px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot.ok { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .dot.err { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
+  .win-btns { display: flex; gap: 4px; -webkit-app-region: no-drag; margin-left: 8px; }
+  .wb { width: 24px; height: 24px; border-radius: 7px; background: rgba(255,255,255,0.06); border: 1px solid transparent; color: var(--dim); font-size: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all .15s; }
+  .wb:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+  .wb.close:hover { background: rgba(239,68,68,0.3); color: #fff; }
+  .wb.on { background: rgba(99,102,241,0.25); color: #c7c9ff; border-color: rgba(99,102,241,0.4); }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 2px 14px 0; }
+
+  /* ---- compact view ---- */
+  .compact { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .c-top { display: flex; align-items: center; gap: 14px; padding: 2px 0; flex-shrink: 0; }
+  .ringbox { position: relative; width: clamp(96px, 30vh, 150px); height: calc(clamp(96px, 30vh, 150px) + 26px); flex-shrink: 0; }
+  .ringbox svg { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 26px); transform: rotate(-90deg); }
+  .ring { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset .8s cubic-bezier(.4,0,.2,1); }
+  .ring-track { stroke: var(--track); }
+  .ring.r0 { stroke: var(--accent); filter: drop-shadow(0 0 4px rgba(99,102,241,.5)); }
+  .ring.r1 { stroke: var(--violet); filter: drop-shadow(0 0 4px rgba(168,85,247,.5)); }
+  .ring.r2 { stroke: var(--cyan); filter: drop-shadow(0 0 4px rgba(34,211,238,.5)); }
+  .ring-badge { stroke-width: 0; fill: var(--panel); stroke: var(--border); }
+  .rc { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 26px); pointer-events: none; }
+  .rc .label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); margin-top: calc(-15px * var(--scale, 1)); font-size: calc(8px * var(--scale, 1)); font-weight: 700; color: var(--text); letter-spacing: 1.5px; white-space: nowrap; }
+  .rc .amount { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 18px; font-weight: 800; color: var(--text); line-height: 1.1; white-space: nowrap; }
+  .ring-sub { position: absolute; top: calc(100% - 24px); left: 0; width: 100%; text-align: center; font-size: 8px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+  .c-side { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .c-item { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; padding: 4px 8px; border-radius: 8px; transition: background .15s; }
+  .c-item:hover { background: rgba(255,255,255,0.05); }
+  .c-item.active { background: rgba(99,102,241,0.14); }
+  .c-item .sw { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .c-item .nm { color: var(--dim); min-width: 36px; }
+  .c-item .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .c-item .bar i { display: block; height: 100%; border-radius: 2px; }
+  .c-item .pv { color: var(--text); font-weight: 700; min-width: 34px; text-align: right; }
+  .c-item .rs { color: var(--faded); font-size: 9px; min-width: 52px; text-align: right; }
+
+  .c-tabs { display: flex; gap: 5px; padding: 4px 0; flex-shrink: 0; }
+  .tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; font-size: 11px; color: var(--dim); background: rgba(255,255,255,0.04); border: 1px solid transparent; cursor: pointer; transition: all .15s; }
+  .tab:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+  .tab.active { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; font-weight: 600; }
+
+  .models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .m-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 0 4px; flex-shrink: 0; }
+  .m-title { font-size: 10px; color: var(--faded); letter-spacing: 1px; }
+  .m-count { font-size: 10px; color: var(--dim); }
+  .m-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
+  .m-list::-webkit-scrollbar { width: 4px; }
+  .m-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+  .m-item { display: flex; align-items: center; padding: 4px 8px; border-radius: 7px; cursor: pointer; transition: background .12s; font-size: 11px; }
+  .m-item:hover { background: rgba(255,255,255,0.05); }
+  .m-item.sel { background: rgba(99,102,241,0.16); }
+  .m-item .nm { color: var(--text); font-weight: 600; min-width: 130px; }
+  .m-item .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--track); margin: 0 8px; overflow: hidden; }
+  .m-item .bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--violet)); }
+  .m-item .cnt { color: var(--dim); font-size: 10px; min-width: 40px; text-align: right; }
+  .m-item .rem { color: var(--cyan); font-size: 9px; margin-left: 5px; }
+
+  /* ---- expanded dashboard ---- */
+  .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .dash.on { display: flex; }
+  .d-limits { display: flex; gap: 8px; padding: 2px 0 6px; flex-shrink: 0; }
+  .l-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all .15s; }
+  .l-card:hover { border-color: var(--border-light); }
+  .l-card.active { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.08); }
+  .l-top { display: flex; justify-content: space-between; align-items: center; }
+  .l-name { font-size: 10px; color: var(--dim); }
+  .l-pct { font-size: 15px; font-weight: 800; }
+  .l-bar { height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; margin: 5px 0 3px; }
+  .l-bar i { display: block; height: 100%; border-radius: 3px; }
+  .l-sub { font-size: 9px; color: var(--faded); display: flex; justify-content: space-between; }
+
+  .d-body { flex: 1; display: flex; gap: 8px; min-height: 0; }
+  .d-left { flex: 1 1 46%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; overflow: hidden; }
+  .d-left .m-head { padding: 0 0 5px; flex-shrink: 0; }
+  .d-left .m-list { flex: 1 1 auto; min-height: 0; }
+  .d-right { flex: 1 1 54%; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+  .d-chart { flex: 1 1 70%; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .chart-title { font-size: 11px; color: var(--text); font-weight: 600; text-align: center; flex-shrink: 0; }
+  .chart-note { font-size: 9px; color: var(--faded); text-align: center; flex-shrink: 0; }
+  .d-chart svg { flex: 1 1 auto; width: 100%; min-height: 0; }
+  .d-stats { display: flex; gap: 8px; flex-shrink: 0; }
+  .s-chip { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; text-align: center; }
+  .s-v { font-size: 14px; font-weight: 800; color: var(--text); }
+  .s-k { font-size: 9px; color: var(--faded); }
+
+  footer { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px 9px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--faded); flex-shrink: 0; }
+  .cal-badge { color: var(--green); }
+
+
+  .op-wrap { display: flex; align-items: center; gap: 4px; -webkit-app-region: no-drag; }
+  .op-label { font-size: 9px; color: var(--dim); min-width: 26px; text-align: right; }
+  #opSlider { -webkit-appearance: none; width: 62px; height: 3px; border-radius: 2px; background: var(--track); outline: none; cursor: pointer; }
+  #opSlider::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 0 5px rgba(99,102,241,0.6); }
+
+  .ctx { position: fixed; z-index: 99; background: rgba(21,27,42,0.97); border: 1px solid var(--border-light); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); padding: 5px; min-width: 190px; display: none; }
+  .ctx.show { display: block; }
+  .ctx button { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); font-size: 11.5px; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+  .ctx button:hover { background: rgba(99,102,241,0.2); }
+  .ctx .sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal-mask.show { display: flex; }
+  .modal { width: 330px; background: var(--panel-2); border: 1px solid var(--border-light); border-radius: 16px; padding: 18px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); }
+  .modal h3 { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  .modal p { font-size: 10.5px; color: var(--dim); margin-bottom: 10px; line-height: 1.6; }
+  .m-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: var(--text); }
+  .m-row input { width: 90px; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; padding: 6px 10px; outline: none; text-align: right; }
+  .m-btns { display: flex; gap: 8px; margin-top: 12px; }
+  .m-btns button { flex: 1; padding: 8px 0; border-radius: 10px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; }
+  .btn-ghost { background: rgba(255,255,255,0.06); color: var(--text); }
+  .m-msg { font-size: 11px; color: var(--green); margin-top: 8px; min-height: 15px; }
+  .k-input { width: 100%; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; padding: 9px 12px; outline: none; margin-bottom: 10px; font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="mark">◈</div><span class="title">Go 用量</span></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="op-wrap">
+        <span class="op-label" id="opLabel">30%</span>
+        <input type="range" id="opSlider" min="10" max="100" value="30" title="???">
+      </div>
+      <div class="status"><span class="dot" id="keyDot"></span><span id="keyText">…</span></div>
+      <div class="win-btns">
+        <button class="wb" id="btnMin" title="收起">─</button>
+        <button class="wb" id="btnExpand" title="展开">□</button>
+        <button class="wb close" id="btnClose" title="关闭">×</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- compact -->
+    <div class="compact" id="compactView">
+      <div class="c-top">
+        <div class="ringbox">
+          <svg viewBox="0 0 118 118">
+            <circle class="ring ring-track" cx="59" cy="59" r="52"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="41"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="28"/>
+            <circle class="ring ring-badge" cx="59" cy="59" r="18"/>
+            <circle class="ring r0" id="ring0" cx="59" cy="59" r="52"/>
+            <circle class="ring r1" id="ring1" cx="59" cy="59" r="41"/>
+            <circle class="ring r2" id="ring2" cx="59" cy="59" r="28"/>
+          </svg>
+          <div class="rc">
+            <span class="label" id="cLabel">总用量</span>
+            <span class="amount" id="cAmount">—</span>
+          </div>
+          <div class="ring-sub" id="cSub"></div>
+        </div>
+        <div class="c-side" id="cSide"></div>
+      </div>
+      <div class="c-tabs" id="cTabs"></div>
+      <div class="models">
+        <div class="m-head"><span class="m-title">模型用量</span><span class="m-count" id="cCount"></span></div>
+        <div class="m-list" id="cList"></div>
+      </div>
+    </div>
+
+    <!-- expanded -->
+    <div class="dash" id="dashView">
+      <div class="d-limits" id="dLimits"></div>
+      <div class="d-body">
+        <div class="d-left">
+          <div class="m-head"><span class="m-title">模型用量</span><span class="m-count" id="dCount"></span></div>
+          <div class="m-list" id="dList"></div>
+        </div>
+        <div class="d-right">
+          <div class="d-chart">
+            <div class="chart-title" id="dChartTitle">点击左侧模型查看曲线</div>
+            <div class="chart-note">近 14 天费用(USD)</div>
+            <svg id="dChartSvg" viewBox="0 0 300 150" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="d-stats" id="dStats"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="footLeft">—</span>
+    <span><span id="calBadge" class="cal-badge"></span><span id="footRight"></span></span>
+  </footer>
+</div>
+
+<div class="ctx" id="ctx">
+  <button data-a="refresh">立即刷新</button>
+  <button data-a="login">打开 Console 登录</button>
+  <button data-a="grab">自动抓取 Cookie 同步真值</button>
+  <button data-a="server">服务端设置（手动）…</button>
+  <button data-a="calibrate">手动校准…</button>
+  <button data-a="key">API Key 设置…</button>  <div class="sep"></div>
+  <button data-a="quit">退出</button>
+</div>
+
+<div class="modal-mask" id="serverMask">
+  <div class="modal" style="width:380px;">
+    <h3>服务端设置（手动）</h3>
+    <p>一般用右键「自动抓取 Cookie」即可。手动：登录 opencode.ai → F12 → Application → Cookies → 复制 <b>auth</b>；workspace ID 在用量页 URL。</p>
+    <div class="m-row"><span>auth Cookie</span><input id="srvCookie" style="width:200px" placeholder="粘贴 auth"></div>
+    <div class="m-row"><span>Workspace ID</span><input id="srvWs" style="width:200px" placeholder="wrk_xxxx"></div>
+    <div class="m-btns"><button class="btn-ghost" id="srvClear">清除</button><button class="btn-primary" id="srvSave">保存并测试</button></div>
+    <div class="m-msg" id="srvMsg"></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="calMask">
+  <div class="modal">
+    <h3>手动校准</h3>
+    <p>填 Console 显示的百分比，补齐本地缺失记录（窗口重置后失效）。</p>
+    <div class="m-row"><span>5小时用量 %</span><span><input id="calS" type="number" min="0" max="100"><span class="loc" id="locS"></span></span></div>
+    <div class="m-row"><span>每周用量 %</span><span><input id="calW" type="number" min="0" max="100"><span class="loc" id="locW"></span></span></div>
+    <div class="m-row"><span>每月用量 %</span><span><input id="calM" type="number" min="0" max="100"><span class="loc" id="locM"></span></span></div>
+    <div class="m-btns"><button class="btn-ghost" id="calClear">清除</button><button class="btn-primary" id="calSave">保存校准</button></div>
+    <div class="m-msg" id="calMsg"></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="keyMask">
+  <div class="modal">
+    <h3>OpenCode Go API Key</h3>
+    <p>用于验证 Key 与拉取模型列表。</p>
+    <input class="k-input" id="keyInput" placeholder="sk-…" spellcheck="false">
+    <div class="m-btns"><button class="btn-ghost" id="keyCancel">关闭</button><button class="btn-primary" id="keySave">保存并验证</button></div>
+    <div class="m-msg" id="keyMsg"></div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const money = (v) => v == null ? "—" : (v >= 1 ? "$" + v.toFixed(2) : (v >= 0.01 ? "$" + v.toFixed(3) : "$" + v.toFixed(4)));
+const countdown = (ms) => {
+  if (ms <= 0) return "即将重置";
+  const s = Math.floor(ms / 1000);
+  if (s >= 86400) { const d = Math.floor(s/86400), h = Math.floor(s%86400/3600); return d + "天" + h + "时"; }
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
+  return h + "时" + m + "分";
+};
+const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];
+const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
+const RING_KEYS = ["session", "weekly", "monthly"];
+const RING_R = [52, 41, 28];
+const COMPACT_H = 480, EXPAND_H = 640;
+
+let state = { windows: [], stats: [], history: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
+let lastCal = null;
+let expanded = false;
+let selModel = null;
+
+function displayWindows() {
+  if (state.server && state.server.length >= 3) {
+    const keys = ["session", "weekly", "monthly"];
+    return state.server.map((w, i) => {
+      const local = state.windows.find(x => x.kind === keys[i]);
+      return { kind: keys[i], used: local ? local.limit * w.pct / 100 : null, limit: (local || {}).limit || [12,30,60][i], pct: w.pct, reset: (local || {}).reset || 0, reset_text: w.reset_text || "", server: true };
+    });
+  }
+  return state.windows;
+}
+function win(kind) { return displayWindows().find(x => x.kind === kind); }
+function circ(r) { return 2 * Math.PI * r; }
+function setRing(i, pct) {
+  const el = $("#ring" + i);
+  const c = circ(RING_R[i]);
+  el.style.strokeDasharray = c;
+  el.style.strokeDashoffset = c * (1 - Math.min(100, pct) / 100);
+}
+function ringColor(pct) { return pct >= 95 ? "#ef4444" : pct >= 70 ? "#f59e0b" : RING_COLORS[0]; }
+function periodName(kind) { return PERIODS[RING_KEYS.indexOf(kind)][0]; }
+function modelKey() { return { session: "count_s", weekly: "count_w", monthly: "count_m" }[state.mode] || "count_s"; }
+
+function render() {
+  try {
+  const wins = displayWindows();
+  const s = wins.find(x => x.kind === "session"), w = wins.find(x => x.kind === "weekly"), m = wins.find(x => x.kind === "monthly");
+  if (!s || !w || !m) return;
+  const cl = $("#cLabel"), ca = $("#cAmount"), cs = $("#cSub");
+  const fitAmount = () => {
+    const scale = Math.max(0.7, Math.min(1.4, (window.innerWidth || 560) / 560));
+    const t = ca.textContent || "";
+    const len = t.length;
+    const base = len >= 7 ? 10 : len === 6 ? 11 : len === 5 ? 12 : len === 4 ? 13 : 15;
+    ca.style.fontSize = Math.round(base * scale) + "px";
+  };
+  if (state.mode === "overview") {
+    cl.textContent = "总用量";
+    const total = (s.used || 0) + (w.used || 0) + (m.used || 0);
+    ca.textContent = total ? money(total) : "—";
+    const hot = [s, w, m].reduce((a, b) => a.pct > b.pct ? a : b);
+    cs.textContent = "最高 " + periodName(hot.kind) + " " + Math.round(hot.pct) + "%";
+  } else {
+    const cur = win(state.mode);
+    cl.textContent = periodName(state.mode);
+    ca.textContent = Math.round(cur.pct) + "%";
+    const resetPart = cur.reset_text || (cur.reset ? "重置 " + countdown(cur.reset - Date.now()) : "");
+    cs.textContent = (cur.used != null ? money(cur.used) + "/" + money(cur.limit) : "") + (resetPart ? " · " + resetPart : "");
+  }
+  fitAmount();
+  setRing(0, s.pct); setRing(1, w.pct); setRing(2, m.pct);
+  renderSide(); renderTabs(); renderModels(); renderLimits(); renderChart(); renderStats();
+  const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
+  const total = (s.used || 0) + (w.used || 0) + (m.used || 0);
+  $("#footLeft").textContent = `累计 ${total ? money(total) : "—"} · ${state.rows} 条 · ${ago}s前`;
+  $("#calBadge").textContent = state.server ? "服务端 ✓ " : (lastCal ? "已校准 ✓ " : "");
+  $("#footRight").textContent = (state.server || lastCal) ? "" : "右键菜单";
+  $("#keyText").textContent = state.keyOk ? `Key ✓ ${state.models}` : "Key ✗";
+  $("#keyDot").className = "dot " + (state.keyOk ? "ok" : "err");
+  } catch (e) { try { document.getElementById("footRight").textContent = "ERR:" + e.message; } catch (_) {} }
+}
+
+function renderSide() {
+  const side = $("#cSide");
+  side.innerHTML = "";
+  const wins = displayWindows();
+  RING_KEYS.forEach((k, i) => {
+    const w = wins.find(x => x.kind === k);
+    if (!w) return;
+    const div = document.createElement("div");
+    div.className = "c-item" + (state.mode === k ? " active" : "");
+    const resetPart = w.reset_text || (w.reset ? countdown(w.reset - Date.now()) : "");
+    div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${resetPart}</span>`;
+    div.onclick = () => { state.mode = k; render(); };
+    side.appendChild(div);
+  });
+}
+
+function renderTabs() {
+  const tb = $("#cTabs");
+  tb.innerHTML = "";
+  [["总览","overview"], ...PERIODS].forEach(([label, mode]) => {
+    const d = document.createElement("div");
+    d.className = "tab" + (state.mode === mode ? " active" : "");
+    d.textContent = label;
+    d.onclick = () => { state.mode = mode; render(); };
+    tb.appendChild(d);
+  });
+}
+
+function sortedStats(key) {
+  return [...state.stats].sort((a, b) => b[key] - a[key]);
+}
+
+function fillModelList(el, key) {
+  el.innerHTML = "";
+  const sorted = sortedStats(key);
+  const max = Math.max(1, ...sorted.map(x => x[key]));
+  sorted.forEach(x => {
+    const div = document.createElement("div");
+    div.className = "m-item" + (selModel === x.model ? " sel" : "");
+    const lim = x.req_lim ? x.req_lim[0] : null;
+    const rem = lim != null ? `<span class="rem">剩${Math.max(0, lim - x[key])}</span>` : "";
+    div.innerHTML = `<span class="nm">${x.name}</span><span class="bar"><i style="width:${Math.min(100, x[key] / max * 100)}%"></i></span><span class="cnt">${x[key]}次${rem}</span>`;
+    div.onclick = () => { selModel = selModel === x.model ? null : x.model; render(); };
+    el.appendChild(div);
+  });
+}
+
+function renderModels() {
+  const key = modelKey();
+  fillModelList($("#cList"), key);
+  fillModelList($("#dList"), key);
+  $("#cCount").textContent = state.stats.length + " 个模型";
+  $("#dCount").textContent = state.stats.length + " 个模型";
+}
+
+function renderLimits() {
+  const dl = $("#dLimits");
+  dl.innerHTML = "";
+  const wins = displayWindows();
+  RING_KEYS.forEach((k, i) => {
+    const w = wins.find(x => x.kind === k);
+    if (!w) return;
+    const div = document.createElement("div");
+    div.className = "l-card" + (state.mode === k ? " active" : "");
+    const resetPart = w.reset_text || (w.reset ? countdown(w.reset - Date.now()) : "");
+    div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
+    div.onclick = () => { state.mode = k; render(); };
+    dl.appendChild(div);
+  });
+}
+
+function renderChart() {
+  const svg = $("#dChartSvg");
+  if (!selModel) { svg.innerHTML = ""; $("#dChartTitle").textContent = "点击左侧模型查看曲线"; return; }
+  const item = state.history.find(h => h.model === selModel);
+  if (!item || !item.series.length) { svg.innerHTML = ""; $("#dChartTitle").textContent = "暂无历史数据"; return; }
+  const pts = item.series;
+  const W = 300, H = 150, PAD_L = 36, PAD_B = 16, PAD_T = 8, PAD_R = 8;
+  const costs = pts.map(p => p.cost);
+  const maxV = Math.max(...costs, 0.0001);
+  const stepX = (W - PAD_L - PAD_R) / Math.max(1, pts.length - 1);
+  const y = (v) => H - PAD_B - (v / maxV) * (H - PAD_T - PAD_B);
+  const x = (i) => PAD_L + i * stepX;
+  let inner = "";
+  for (let g = 0; g <= 4; g++) {
+    const gy = PAD_T + (H - PAD_T - PAD_B) * g / 4;
+    inner += `<line x1="${PAD_L}" y1="${gy}" x2="${W-PAD_R}" y2="${gy}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+    inner += `<text x="${PAD_L-4}" y="${gy+3}" fill="#8a93a6" font-size="8" text-anchor="end">${(maxV*(1-g/4)).toFixed(3)}</text>`;
+  }
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.cost).toFixed(1)}`).join(" ");
+  const area = line + ` L${x(pts.length-1).toFixed(1)},${H-PAD_B} L${x(0).toFixed(1)},${H-PAD_B} Z`;
+  inner += `<path d="${area}" fill="url(#gfill)" opacity="0.5"/>`;
+  inner += `<path d="${line}" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round"/>`;
+  const labelStep = Math.max(1, Math.ceil(pts.length / 7));
+  pts.forEach((p, i) => {
+    if (i % labelStep === 0 || i === pts.length - 1) {
+      inner += `<text x="${x(i)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${p.date}</text>`;
+    }
+  });
+  svg.innerHTML = `<defs><linearGradient id="gfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.5"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>${inner}`;
+  const total = pts.reduce((a, p) => a + p.cost, 0);
+  const maxP = Math.max(...costs);
+  $("#dChartTitle").textContent = `${item.name} · 14天 $${total.toFixed(2)} · 峰值 $${maxP.toFixed(3)}`;
+}
+
+function renderStats() {
+  const ds = $("#dStats");
+  ds.innerHTML = "";
+  const key = modelKey();
+  const totalReq = state.stats.reduce((a, x) => a + x[key], 0);
+  const totalCost = state.stats.reduce((a, x) => a + x.cost_s, 0);
+  [["请求数", totalReq + " 次"], ["5h费用", money(totalCost)], ["模型数", state.stats.length + " 个"]].forEach(([k, v]) => {
+    const div = document.createElement("div");
+    div.className = "s-chip";
+    div.innerHTML = `<div class="s-v">${v}</div><div class="s-k">${k}</div>`;
+    ds.appendChild(div);
+  });
+}
+
+async function refresh() {
+  try {
+    if (!window.pywebview || !window.pywebview.api) { setTimeout(refresh, 500); return; }
+    const data = await window.pywebview.api.get_snapshot();
+    state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
+    state.rows = data.rows; state.lastRefresh = Date.now();
+    lastCal = data.calibration;
+    state.server = data.server || null;
+    state.server_error = data.server_error || null;
+    state.keyOk = !!data.key; state.models = data.models || 0;
+    render();
+  } catch (e) {
+    $("#keyDot").className = "dot err"; $("#keyText").textContent = "后端未连接";
+  }
+}
+
+function setExpanded(v) {
+  expanded = v;
+  $("#btnExpand").classList.toggle("on", v);
+  $("#btnExpand").textContent = v ? "▣" : "□";
+  $("#compactView").style.display = v ? "none" : "flex";
+  $("#dashView").classList.toggle("on", v);
+  window.pywebview.api.resize_window(560, v ? EXPAND_H : COMPACT_H);
+  window.pywebview.api.save_expanded(v);
+  setTimeout(() => render(), 250);
+}
+
+function showCtx(x, y) {
+  const c = $("#ctx");
+  c.style.visibility = "hidden";
+  c.classList.add("show");
+  const r = c.getBoundingClientRect();
+  let nx = Math.min(x, window.innerWidth - r.width - 6);
+  let ny = Math.min(y, window.innerHeight - r.height - 6);
+  c.style.left = Math.max(4, nx) + "px";
+  c.style.top = Math.max(4, ny) + "px";
+  c.style.visibility = "visible";
+}
+function hideCtx() { $("#ctx").classList.remove("show"); }
+function showModal(id) { $("#" + id).classList.add("show"); }
+function hideModal(id) { $("#" + id).classList.remove("show"); }
+
+function applyOpacity(v) {
+  const val = Math.max(0.1, Math.min(1, v));
+  document.documentElement.style.setProperty("--alpha", String(val));
+  const lbl = document.getElementById("opLabel");
+  if (lbl) lbl.textContent = Math.round(val * 100) + "%";
+  const sl = document.getElementById("opSlider");
+  if (sl) sl.value = String(Math.round(val * 100));
+}
+async function initOpacity() {
+  try {
+    const v = await window.pywebview.api.get_opacity();
+    applyOpacity(v || 0.3);
+  } catch (_) { applyOpacity(0.3); }
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const sl = document.getElementById("opSlider");
+  if (sl) sl.addEventListener("input", () => {
+    const v = Number(sl.value) / 100;
+    applyOpacity(v);
+    window.pywebview.api.save_opacity(v);
+  });
+});
+async function initExpanded() {
+  try {
+    const v = await window.pywebview.api.get_expanded();
+    if (v === true) setExpanded(true);
+  } catch (_) {}
+}
+
+async function showServer() {
+  const d = await window.pywebview.api.get_server_config() || {};
+  $("#srvCookie").value = d.auth_cookie || ""; $("#srvWs").value = d.workspace_id || "";
+  $("#srvMsg").textContent = ""; showModal("serverMask");
+}
+async function showCal() {
+  const c = await window.pywebview.api.get_calibration() || {};
+  $("#calS").value = c.session ?? ""; $("#calW").value = c.weekly ?? ""; $("#calM").value = c.monthly ?? "";
+  const s = win("session"), w = win("weekly"), m = win("monthly");
+  $("#locS").textContent = " 本地 " + (s ? Math.round(s.pct) : 0) + "%";
+  $("#locW").textContent = " 本地 " + (w ? Math.round(w.pct) : 0) + "%";
+  $("#locM").textContent = " 本地 " + (m ? Math.round(m.pct) : 0) + "%";
+  $("#calMsg").textContent = ""; showModal("calMask");
+}
+async function showKey() {
+  $("#keyInput").value = (await window.pywebview.api.get_key()) || "";
+  $("#keyMsg").textContent = ""; showModal("keyMask");
+}
+async function doGrab() {
+  const res = await window.pywebview.api.grab_cookie();
+  if (res && res.ok) {
+    await refresh();
+    if (state.server) alert("✓ 已抓取 Cookie，服务端真值已同步！");
+    else alert("Cookie 已保存，但用量页解析失败：" + (state.server_error || "未知") + "\n请确认 Console 窗口已打开用量页后重试。");
+  } else {
+    alert("抓取失败：" + (res && res.error ? res.error : "未知错误"));
+  }
+}
+
+$("#btnMin").onclick = () => setExpanded(false);
+$("#btnExpand").onclick = () => setExpanded(!expanded);
+$("#btnClose").onclick = () => window.pywebview.api.quit();
+
+document.addEventListener("contextmenu", (e) => { e.preventDefault(); showCtx(e.clientX, e.clientY); });
+document.addEventListener("click", (e) => { if (!e.target.closest(".ctx")) hideCtx(); });
+$("#ctx").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const a = b.dataset.a;
+  hideCtx();
+  if (a === "refresh") refresh();
+  if (a === "login") window.pywebview.api.open_console();
+  if (a === "grab") doGrab();
+  if (a === "server") showServer();
+  if (a === "calibrate") showCal();
+  if (a === "key") showKey();
+  if (a === "quit") window.pywebview.api.quit();
+});
+
+$("#calSave").onclick = async () => {
+  const v = { session: +$("#calS").value || 0, weekly: +$("#calW").value || 0, monthly: +$("#calM").value || 0 };
+  const ok = await window.pywebview.api.save_calibration(v.session, v.weekly, v.monthly);
+  $("#calMsg").textContent = ok ? "已保存 ✓" : "保存失败";
+  if (ok) { setTimeout(() => hideModal("calMask"), 900); refresh(); }
+};
+$("#calClear").onclick = async () => { await window.pywebview.api.save_calibration(0, 0, 0); $("#calMsg").textContent = "已清除"; refresh(); };
+$("#keySave").onclick = async () => {
+  const ok = await window.pywebview.api.save_key($("#keyInput").value.trim());
+  $("#keyMsg").textContent = ok ? "Key 已保存 ✓" : "保存失败";
+  if (ok) { setTimeout(() => hideModal("keyMask"), 900); refresh(); }
+};
+$("#keyCancel").onclick = () => hideModal("keyMask");
+$("#srvSave").onclick = async () => {
+  const ok = await window.pywebview.api.save_server_config($("#srvCookie").value.trim(), $("#srvWs").value.trim());
+  $("#srvMsg").textContent = "已保存，测试中…";
+  if (ok) {
+    await refresh();
+    if (state.server) { $("#srvMsg").textContent = "✓ 服务端连接成功"; setTimeout(() => hideModal("serverMask"), 1200); }
+    else $("#srvMsg").textContent = "✗ " + (state.server_error || "连接失败");
+  } else $("#srvMsg").textContent = "保存失败";
+};
+$("#srvClear").onclick = async () => { await window.pywebview.api.save_server_config("", ""); $("#srvMsg").textContent = "已清除"; refresh(); };
+["serverMask","calMask","keyMask"].forEach(id => {
+  $("#" + id).addEventListener("click", (e) => { if (e.target === $("#" + id)) $("#" + id).classList.remove("show"); });
+});
+
+let dragging = false, ox = 0, oy = 0;
+document.querySelector("header").addEventListener("mousedown", (e) => {
+  if (e.target.closest(".wb")) return;
+  dragging = true; ox = e.screenX; oy = e.screenY;
+});
+document.addEventListener("mousemove", (e) => {
+  if (!dragging) return;
+  window.pywebview.api.move_window(e.screenX - ox, e.screenY - oy);
+  ox = e.screenX; oy = e.screenY;
+});
+document.addEventListener("mouseup", () => { dragging = false; });
+
+initOpacity();
+function syncScale() {
+  const s = Math.max(0.7, Math.min(1.4, (window.innerWidth || 560) / 560));
+  document.documentElement.style.setProperty("--scale", String(s));
+}
+window.addEventListener("resize", syncScale);
+setTimeout(initExpanded, 1200);
+setTimeout(refresh, 800);
+syncScale();
+setInterval(refresh, 60000);
+setInterval(render, 1000);
+</script>
+</body>
+</html>
