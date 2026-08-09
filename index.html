@@ -83,9 +83,16 @@
   .tab.active { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; font-weight: 600; }
 
   .models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .m-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 0 4px; flex-shrink: 0; }
-  .m-title { font-size: 10px; color: var(--faded); letter-spacing: 1px; }
-  .m-count { font-size: 10px; color: var(--dim); }
+  .m-head { display: flex; justify-content: space-between; align-items: center; gap: 5px; padding: 2px 0 4px; flex-shrink: 0; }
+  .m-title { font-size: 10px; color: var(--faded); letter-spacing: 1px; flex-shrink: 0; }
+  .m-count { font-size: 10px; color: var(--dim); flex-shrink: 0; }
+  .m-filters { display: flex; gap: 2px; background: rgba(255,255,255,0.05); border-radius: 7px; padding: 2px; flex-shrink: 0; }
+  .f-btn { border: none; background: none; color: var(--faded); font-size: 9.5px; padding: 2px 8px; border-radius: 5px; cursor: pointer; transition: all .15s; }
+  .f-btn:hover { color: var(--text); }
+  .f-btn.on { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; font-weight: 600; }
+  .unit-btn { border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--dim); font-size: 9.5px; padding: 2px 7px; border-radius: 6px; cursor: pointer; flex-shrink: 0; transition: all .15s; }
+  .unit-btn:hover { color: var(--text); border-color: var(--border-light); }
+  .unit-btn.on { color: #c7c9ff; border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.15); }
   .m-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
   .m-list::-webkit-scrollbar { width: 4px; }
   .m-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
@@ -97,6 +104,7 @@
   .m-item .bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--violet)); }
   .m-item .cnt { color: var(--dim); font-size: 10px; min-width: 40px; text-align: right; }
   .m-item .rem { color: var(--cyan); font-size: 9px; margin-left: 5px; }
+  .m-item .sub { color: var(--faded); font-size: 9px; margin-left: 5px; }
 
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
@@ -198,7 +206,16 @@
       </div>
       <div class="c-tabs" id="cTabs"></div>
       <div class="models">
-        <div class="m-head"><span class="m-title">模型用量</span><span class="m-count" id="cCount"></span></div>
+        <div class="m-head">
+          <span class="m-title">模型用量</span>
+          <div class="m-filters" id="cFilters">
+            <button class="f-btn on" data-f="all">全部</button>
+            <button class="f-btn" data-f="go">go</button>
+            <button class="f-btn" data-f="free">free</button>
+          </div>
+          <button class="unit-btn" id="cUnitBtn" title="切换 次数/Token">次数</button>
+          <span class="m-count" id="cCount"></span>
+        </div>
         <div class="m-list" id="cList"></div>
       </div>
     </div>
@@ -208,13 +225,22 @@
       <div class="d-limits" id="dLimits"></div>
       <div class="d-body">
         <div class="d-left">
-          <div class="m-head"><span class="m-title">模型用量</span><span class="m-count" id="dCount"></span></div>
+          <div class="m-head">
+            <span class="m-title">模型用量</span>
+            <div class="m-filters" id="dFilters">
+              <button class="f-btn on" data-f="all">全部</button>
+              <button class="f-btn" data-f="go">go</button>
+              <button class="f-btn" data-f="free">free</button>
+            </div>
+            <button class="unit-btn" id="dUnitBtn" title="切换 次数/Token">次数</button>
+            <span class="m-count" id="dCount"></span>
+          </div>
           <div class="m-list" id="dList"></div>
         </div>
         <div class="d-right">
           <div class="d-chart">
             <div class="chart-title" id="dChartTitle">点击左侧模型查看曲线</div>
-            <div class="chart-note">近 14 天费用(USD)</div>
+            <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
             <svg id="dChartSvg" viewBox="0 0 300 150" preserveAspectRatio="none"></svg>
           </div>
           <div class="d-stats" id="dStats"></div>
@@ -292,6 +318,24 @@ let state = { windows: [], stats: [], history: [], mode: "overview", rows: 0, ke
 let lastCal = null;
 let expanded = false;
 let selModel = null;
+let mFilter = "all";
+let mUnit = "count";
+
+function fmtTokens(n) {
+  if (n == null || isNaN(n)) return "0";
+  if (n >= 1e9) return (n / 1e9).toFixed(2).replace(/\.?0+$/, "") + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.?0$/, "") + "K";
+  return String(Math.round(n));
+}
+function fmtCost(v) {
+  if (v == null || !isFinite(v)) return "—";
+  return "$" + (v >= 1 ? v.toFixed(2) : (v >= 0.01 ? v.toFixed(3) : v.toFixed(4)));
+}
+function modelValue(x, key) {
+  if (mUnit === "token") return x.tokens_in + x.tokens_out;
+  return x[key] || 0;
+}
 
 function displayWindows() {
   if (state.server && state.server.length >= 3) {
@@ -382,21 +426,29 @@ function renderTabs() {
   });
 }
 
-function sortedStats(key) {
-  return [...state.stats].sort((a, b) => b[key] - a[key]);
+function filteredStats() {
+  if (mFilter === "all") return state.stats;
+  return state.stats.filter(x => x.group === mFilter);
 }
 
 function fillModelList(el, key) {
   el.innerHTML = "";
-  const sorted = sortedStats(key);
-  const max = Math.max(1, ...sorted.map(x => x[key]));
+  const stats = filteredStats();
+  const sorted = [...stats].sort((a, b) => modelValue(b, key) - modelValue(a, key));
+  const max = Math.max(1, ...sorted.map(x => modelValue(x, key)));
   sorted.forEach(x => {
     const div = document.createElement("div");
-    div.className = "m-item" + (selModel === x.model ? " sel" : "");
-    const lim = x.req_lim ? x.req_lim[0] : null;
-    const rem = lim != null ? `<span class="rem">剩${Math.max(0, lim - x[key])}</span>` : "";
-    div.innerHTML = `<span class="nm">${x.name}</span><span class="bar"><i style="width:${Math.min(100, x[key] / max * 100)}%"></i></span><span class="cnt">${x[key]}次${rem}</span>`;
-    div.onclick = () => { selModel = selModel === x.model ? null : x.model; render(); };
+    const mKey = x.key || x.model;
+    div.className = "m-item" + (selModel === mKey ? " sel" : "") + (x.group === "free" ? " free" : "");
+    const val = modelValue(x, key);
+    const isTok = mUnit === "token";
+    const main = isTok ? fmtTokens(val) : val + "次";
+    const extra = x.group === "free"
+      ? (isTok ? val + " tok" : fmtTokens(x.tokens_in + x.tokens_out) + " tok")
+      : fmtCost(x.cost_total);
+    const rem = (!isTok && x.req_lim) ? `<span class="rem">剩${Math.max(0, x.req_lim[0] - (x[key] || 0))}</span>` : "";
+    div.innerHTML = `<span class="nm" title="${x.model}">${x.name}</span><span class="bar"><i style="width:${Math.min(100, val / max * 100)}%"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
+    div.onclick = () => { selModel = selModel === mKey ? null : mKey; render(); };
     el.appendChild(div);
   });
 }
@@ -405,8 +457,16 @@ function renderModels() {
   const key = modelKey();
   fillModelList($("#cList"), key);
   fillModelList($("#dList"), key);
-  $("#cCount").textContent = state.stats.length + " 个模型";
-  $("#dCount").textContent = state.stats.length + " 个模型";
+  const n = filteredStats().length;
+  $("#cCount").textContent = n + " 个模型";
+  $("#dCount").textContent = n + " 个模型";
+  document.querySelectorAll(".unit-btn").forEach(b => {
+    b.classList.toggle("on", mUnit === "token");
+    b.textContent = mUnit === "token" ? "Token" : "次数";
+  });
+  document.querySelectorAll(".m-filters").forEach(f => {
+    [...f.children].forEach(btn => btn.classList.toggle("on", btn.dataset.f === mFilter));
+  });
 }
 
 function renderLimits() {
@@ -427,23 +487,27 @@ function renderLimits() {
 
 function renderChart() {
   const svg = $("#dChartSvg");
-  if (!selModel) { svg.innerHTML = ""; $("#dChartTitle").textContent = "点击左侧模型查看曲线"; return; }
-  const item = state.history.find(h => h.model === selModel);
+  const note = $("#chartNote");
+  if (!selModel) { svg.innerHTML = ""; $("#dChartTitle").textContent = "点击左侧模型查看曲线"; if (note) note.textContent = "近 14 天费用(USD)"; return; }
+  const item = state.history.find(h => (h.key || h.model) === selModel);
   if (!item || !item.series.length) { svg.innerHTML = ""; $("#dChartTitle").textContent = "暂无历史数据"; return; }
+  const isFree = !!item.is_free;
+  if (note) note.textContent = isFree ? "近 14 天 Token(输入+输出)" : "近 14 天费用(USD)";
   const pts = item.series;
   const W = 300, H = 150, PAD_L = 36, PAD_B = 16, PAD_T = 8, PAD_R = 8;
-  const costs = pts.map(p => p.cost);
-  const maxV = Math.max(...costs, 0.0001);
+  const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out) : p.cost);
+  const maxV = Math.max(...vals, isFree ? 1 : 0.0001);
   const stepX = (W - PAD_L - PAD_R) / Math.max(1, pts.length - 1);
   const y = (v) => H - PAD_B - (v / maxV) * (H - PAD_T - PAD_B);
   const x = (i) => PAD_L + i * stepX;
+  const fmtV = (v) => isFree ? fmtTokens(v) : v.toFixed(3);
   let inner = "";
   for (let g = 0; g <= 4; g++) {
     const gy = PAD_T + (H - PAD_T - PAD_B) * g / 4;
     inner += `<line x1="${PAD_L}" y1="${gy}" x2="${W-PAD_R}" y2="${gy}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
-    inner += `<text x="${PAD_L-4}" y="${gy+3}" fill="#8a93a6" font-size="8" text-anchor="end">${(maxV*(1-g/4)).toFixed(3)}</text>`;
+    inner += `<text x="${PAD_L-4}" y="${gy+3}" fill="#8a93a6" font-size="8" text-anchor="end">${fmtV(maxV*(1-g/4))}</text>`;
   }
-  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.cost).toFixed(1)}`).join(" ");
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(vals[i]).toFixed(1)}`).join(" ");
   const area = line + ` L${x(pts.length-1).toFixed(1)},${H-PAD_B} L${x(0).toFixed(1)},${H-PAD_B} Z`;
   inner += `<path d="${area}" fill="url(#gfill)" opacity="0.5"/>`;
   inner += `<path d="${line}" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round"/>`;
@@ -454,23 +518,29 @@ function renderChart() {
     }
   });
   svg.innerHTML = `<defs><linearGradient id="gfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.5"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>${inner}`;
-  const total = pts.reduce((a, p) => a + p.cost, 0);
-  const maxP = Math.max(...costs);
-  $("#dChartTitle").textContent = `${item.name} · 14天 $${total.toFixed(2)} · 峰值 $${maxP.toFixed(3)}`;
+  const total = vals.reduce((a, v) => a + v, 0);
+  const maxP = Math.max(...vals);
+  $("#dChartTitle").textContent = `${item.name} · 14天 ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
 }
 
 function renderStats() {
   const ds = $("#dStats");
   ds.innerHTML = "";
   const key = modelKey();
-  const totalReq = state.stats.reduce((a, x) => a + x[key], 0);
-  const totalCost = state.stats.reduce((a, x) => a + x.cost_s, 0);
-  [["请求数", totalReq + " 次"], ["5h费用", money(totalCost)], ["模型数", state.stats.length + " 个"]].forEach(([k, v]) => {
+  const st = filteredStats();
+  const totalReq = st.reduce((a, x) => a + (x[key] || 0), 0);
+  const totalCost = st.reduce((a, x) => a + x.cost_s, 0);
+  const totalTok = st.reduce((a, x) => a + (x.tokens_in || 0) + (x.tokens_out || 0), 0);
+  [["请求数", totalReq + " 次"], ["5h费用", money(totalCost)], ["模型数", st.length + " 个"]].forEach(([k, v]) => {
     const div = document.createElement("div");
     div.className = "s-chip";
     div.innerHTML = `<div class="s-v">${v}</div><div class="s-k">${k}</div>`;
     ds.appendChild(div);
   });
+  const tokDiv = document.createElement("div");
+  tokDiv.className = "s-chip";
+  tokDiv.innerHTML = `<div class="s-v">${fmtTokens(totalTok)}</div><div class="s-k">Token</div>`;
+  ds.appendChild(tokDiv);
 }
 
 async function refresh() {
@@ -577,6 +647,32 @@ $("#btnMin").onclick = () => setExpanded(false);
 $("#btnExpand").onclick = () => setExpanded(!expanded);
 $("#btnClose").onclick = () => window.pywebview.api.quit();
 
+function saveViewPrefs() {
+  try { localStorage.setItem("mFilter", mFilter); localStorage.setItem("mUnit", mUnit); } catch (_) {}
+}
+function loadViewPrefs() {
+  try {
+    const f = localStorage.getItem("mFilter");
+    const u = localStorage.getItem("mUnit");
+    if (f === "go" || f === "free") mFilter = f;
+    if (u === "token") mUnit = u;
+  } catch (_) {}
+}
+document.querySelectorAll(".m-filters").forEach(f => {
+  f.addEventListener("click", (e) => {
+    const btn = e.target.closest(".f-btn");
+    if (!btn) return;
+    mFilter = btn.dataset.f;
+    saveViewPrefs(); render();
+  });
+});
+document.querySelectorAll(".unit-btn").forEach(b => {
+  b.addEventListener("click", () => {
+    mUnit = mUnit === "token" ? "count" : "token";
+    saveViewPrefs(); render();
+  });
+});
+
 document.addEventListener("contextmenu", (e) => { e.preventDefault(); showCtx(e.clientX, e.clientY); });
 document.addEventListener("click", (e) => { if (!e.target.closest(".ctx")) hideCtx(); });
 $("#ctx").addEventListener("click", (e) => {
@@ -633,6 +729,8 @@ document.addEventListener("mousemove", (e) => {
 document.addEventListener("mouseup", () => { dragging = false; });
 
 initOpacity();
+syncScale();
+loadViewPrefs();
 function syncScale() {
   const s = Math.max(0.7, Math.min(1.4, (window.innerWidth || 560) / 560));
   document.documentElement.style.setProperty("--scale", String(s));

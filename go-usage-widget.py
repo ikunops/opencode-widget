@@ -82,6 +82,19 @@ DISPLAY_NAMES = {
     "deepseek-v4-pro": "DeepSeek V4 Pro", "deepseek-v4-flash": "DeepSeek V4 Flash", "hy3": "Hy3",
 }
 
+FREE_SUFFIXES = ("-free", ":free", "/free")
+FREE_WHITELIST = {"big-pickle"}
+PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo"}
+
+
+def is_free_model(model):
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    if m in FREE_WHITELIST:
+        return True
+    return any(s in m for s in FREE_SUFFIXES)
+
 
 def load_config():
     if os.path.exists(CONFIG_PATH):
@@ -127,7 +140,7 @@ def est_cost(model, tokens):
     return cost / 1_000_000
 
 
-def read_opencode_go():
+def read_opencode_all():
     rows = []
     if not os.path.exists(OPENCODE_DB):
         return rows
@@ -135,13 +148,15 @@ def read_opencode_go():
         conn = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True, timeout=15)
         cur = conn.execute(
             "select data from message where json_valid(data) "
-            "and json_extract(data,'$.role')='assistant' "
-            "and json_extract(data,'$.providerID')='opencode-go'"
+            "and json_extract(data,'$.role')='assistant'"
         )
         for (data,) in cur:
             try:
                 d = json.loads(data)
             except Exception:
+                continue
+            src = PROVIDER_SRC.get(d.get("providerID"))
+            if not src:
                 continue
             t = (d.get("time") or {}).get("created")
             if not t:
@@ -152,7 +167,7 @@ def read_opencode_go():
                 "cost": float(cost) if isinstance(cost, (int, float)) else 0.0,
                 "model": d.get("modelID") or "?",
                 "tokens": d.get("tokens") or {},
-                "src": "opencode",
+                "src": src,
             })
         conn.close()
     except Exception:
@@ -205,7 +220,7 @@ def read_codex_logs(cursor):
                 "cost": est_cost(model, tokens),
                 "model": model,
                 "tokens": tokens,
-                "src": "codex",
+                "src": "go",
             })
         conn.close()
         return rows, max_id
@@ -270,10 +285,12 @@ def model_stats(rows, now_ms):
     ms, me = month_bounds(now_ms, min((r["ts"] for r in rows), default=now_ms))
     for r in rows:
         m = r["model"]
-        if m not in stats:
-            stats[m] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
-                        "tokens_in": 0, "tokens_out": 0, "cost_total": 0.0}
-        s = stats[m]
+        src = r.get("src") or "?"
+        key = (m, src)
+        if key not in stats:
+            stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
+                          "tokens_in": 0, "tokens_out": 0, "cost_total": 0.0}
+        s = stats[key]
         if session_start <= r["ts"] < now_ms:
             s["count_s"] += 1
             if r["cost"] is not None:
@@ -287,11 +304,26 @@ def model_stats(rows, now_ms):
         s["tokens_out"] += tk.get("output", 0) or 0
         if r["cost"] is not None:
             s["cost_total"] += r["cost"]
+
+    src_count = {}
+    for (m, src) in stats:
+        if is_free_model(m):
+            src_count[m] = src_count.get(m, 0) + 1
+
     out = []
-    for m, s in stats.items():
+    for (m, src), s in stats.items():
+        is_free = is_free_model(m)
+        group = "free" if is_free else "go"
+        name = DISPLAY_NAMES.get(m, m)
+        if is_free and src_count.get(m, 0) > 1:
+            name = f"{name} ({src})"
         out.append({
             "model": m,
-            "name": DISPLAY_NAMES.get(m, m),
+            "source": src,
+            "key": f"{m}|{src}",
+            "is_free": is_free,
+            "group": group,
+            "name": name,
             "count_s": s["count_s"], "count_w": s["count_w"], "count_m": s["count_m"],
             "cost_s": s["cost_s"], "cost_total": s["cost_total"],
             "tokens_in": s["tokens_in"], "tokens_out": s["tokens_out"],
@@ -310,14 +342,31 @@ def model_history(rows, days=14):
             continue
         d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%m-%d")
         m = r["model"]
-        b = buckets.setdefault(m, {}).setdefault(d, [0.0, 0])
+        src = r.get("src") or "?"
+        key = (m, src)
+        b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0])
         b[0] += r["cost"] if r["cost"] is not None else 0.0
         b[1] += 1
+        tk = r.get("tokens") or {}
+        b[2] += tk.get("input", 0) or 0
+        b[3] += tk.get("output", 0) or 0
+
+    src_count = {}
+    for (m, src) in buckets:
+        if is_free_model(m):
+            src_count[m] = src_count.get(m, 0) + 1
+
     out = []
-    for m, days_map in buckets.items():
-        series = [{"date": k, "cost": round(v[0], 4), "count": v[1]}
+    for (m, src), days_map in buckets.items():
+        series = [{"date": k, "cost": round(v[0], 4), "count": v[1],
+                   "tokens_in": v[2], "tokens_out": v[3]}
                   for k, v in sorted(days_map.items())]
-        out.append({"model": m, "name": DISPLAY_NAMES.get(m, m), "series": series})
+        name = DISPLAY_NAMES.get(m, m)
+        if is_free_model(m) and src_count.get(m, 0) > 1:
+            name = f"{name} ({src})"
+        out.append({"model": m, "source": src, "key": f"{m}|{src}",
+                    "name": name, "is_free": is_free_model(m),
+                    "series": series})
     out.sort(key=lambda x: -sum(p["cost"] for p in x["series"]))
     return out
 
@@ -478,7 +527,7 @@ class Api:
         self._win = win
 
     def refresh_data(self):
-        go_rows = read_opencode_go()
+        go_rows = read_opencode_all()
         cx_rows, new_id = read_codex_logs(self.last_log_id)
         with self.lock:
             if new_id > self.last_log_id:
