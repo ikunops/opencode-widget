@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -9,6 +9,7 @@
     --bg: rgba(13, 17, 28, var(--alpha));
     --panel: rgba(24, 30, 46, 0.97);
     --panel-2: rgba(28, 35, 54, 0.97);
+    --glass: rgba(24, 30, 46, calc(var(--alpha) * 0.97));
     --border: rgba(255, 255, 255, 0.08);
     --border-light: rgba(255, 255, 255, 0.14);
     --text: #e8ebf4;
@@ -61,7 +62,7 @@
   .ring.r0 { stroke: var(--accent); filter: drop-shadow(0 0 4px rgba(99,102,241,.5)); }
   .ring.r1 { stroke: var(--violet); filter: drop-shadow(0 0 4px rgba(168,85,247,.5)); }
   .ring.r2 { stroke: var(--cyan); filter: drop-shadow(0 0 4px rgba(34,211,238,.5)); }
-  .ring-badge { stroke-width: 0; fill: var(--panel); stroke: var(--border); }
+  .ring-badge { stroke-width: 0; fill: var(--glass); stroke: var(--border); }
   .rc { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 26px); pointer-events: none; }
   .rc .label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); margin-top: calc(-15px * var(--scale, 1)); font-size: calc(8px * var(--scale, 1)); font-weight: 700; color: var(--text); letter-spacing: 1.5px; white-space: nowrap; }
   .rc .amount { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 18px; font-weight: 800; color: var(--text); line-height: 1.1; white-space: nowrap; }
@@ -126,14 +127,14 @@
   .s-model { font-size: 11px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-hint { font-size: 9px; color: var(--faded); letter-spacing: 0.5px; }
   .s-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 10px; color: var(--dim); flex-shrink: 0; }
-  .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; }
+  .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--glass); border: 1px solid var(--border); border-radius: 7px; }
   .s-grid .sg b { color: var(--text); font-weight: 700; }
 
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .dash.on { display: flex; }
   .d-limits { display: flex; gap: 8px; padding: 2px 0 6px; flex-shrink: 0; }
-  .l-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all .15s; }
+  .l-card { flex: 1; background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; cursor: pointer; transition: all .15s; }
   .l-card:hover { border-color: var(--border-light); }
   .l-card.active { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.08); }
   .l-top { display: flex; justify-content: space-between; align-items: center; }
@@ -148,20 +149,20 @@
   .dash.on { display: flex; }
   .d-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
   .d-sup-tabs { display: flex; gap: 5px; }
-  .d-sup-tabs .sup-tab { padding: 5px 14px; border-radius: 9px; font-size: 12px; font-weight: 400; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; letter-spacing: 0.3px; }
+  .d-sup-tabs .sup-tab { padding: 5px 14px; border-radius: 9px; font-size: 12px; font-weight: 400; color: var(--dim); background: var(--glass); border: 1px solid var(--border); cursor: pointer; transition: all .15s; letter-spacing: 0.3px; }
   .d-sup-tabs .sup-tab:hover { border-color: var(--border-light); color: var(--text); }
   .d-sup-tabs .sup-tab.on { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.45); color: #c7c9ff; }
   .d-range { display: flex; gap: 5px; }
-  .d-range .r-btn { padding: 5px 12px; border-radius: 9px; font-size: 11.5px; font-weight: 400; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .d-range .r-btn { padding: 5px 12px; border-radius: 9px; font-size: 11.5px; font-weight: 400; color: var(--dim); background: var(--glass); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
   .d-range .r-btn.on { background: rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.4); color: #a5f3fc; }
 
   .d-stats-row { display: flex; gap: 8px; flex-shrink: 0; }
-  .stat-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 8px 12px; }
+  .stat-card { flex: 1; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 8px 12px; }
   .stat-card .sk { font-size: 10px; font-weight: 400; color: var(--faded); letter-spacing: 0.3px; }
   .stat-card .sv { font-size: 17px; font-weight: 500; color: var(--text); margin-top: 2px; white-space: nowrap; }
   .stat-card .sv small { font-size: 10px; color: var(--dim); font-weight: 400; }
 
-  .d-heat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 9px 12px; flex-shrink: 0; overflow: hidden; }
+  .d-heat-card { background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 9px 12px; flex-shrink: 0; overflow: hidden; }
   .heat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
   .heat-title { font-size: 12px; font-weight: 500; color: var(--text); }
   .heat-legend { display: flex; align-items: center; gap: 3px; font-size: 9.5px; color: var(--faded); }
@@ -173,16 +174,16 @@
   .heat-dow span { height: 14px; line-height: 14px; }
 
   .d-bottom { flex: 1; display: flex; gap: 8px; min-height: 0; }
-  .d-chart { flex: 1 1 58%; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .d-chart { flex: 1 1 58%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .chart-title { font-size: 12.5px; color: var(--text); font-weight: 500; text-align: center; flex-shrink: 0; letter-spacing: 0.3px; }
   .chart-note { font-size: 10px; color: var(--faded); text-align: center; flex-shrink: 0; }
   .d-chart svg { flex: 1 1 auto; width: 100%; min-height: 0; }
   .d-detail { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px; margin: 4px 0 2px;
-    background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: 9px; flex-shrink: 0; }
+    background: rgba(99,102,241,calc(var(--alpha) * 0.14)); border: 1px solid rgba(99,102,241,calc(var(--alpha) * 0.35)); border-radius: 9px; flex-shrink: 0; }
   .d-detail-name { width: 100%; font-size: 11.5px; font-weight: 500; color: #a5b4fc; }
   .d-detail-cell { font-size: 10px; color: var(--dim); display: inline-flex; gap: 4px; align-items: baseline; }
   .d-detail-cell b { color: var(--text); font-weight: 500; }
-  .d-list-card { flex: 1 1 42%; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .d-list-card { flex: 1 1 42%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .d-list-card .m-head { padding: 0 0 6px; flex-shrink: 0; }
   .d-list-card .m-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
