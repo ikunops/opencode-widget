@@ -110,7 +110,22 @@ DISPLAY_NAMES = {
     "nemotron-3-super-120b-a12b-free": "Nemotron 3 Super 120B", "gemma-4-31b-it-free": "Gemma 4 31B",
     "hy3-preview": "Hy3 Preview",
     "big-pickle": "Big Pickle",
+    "nemotron-3-nano-omni-30b-a3b-reasoning-free": "Nemotron 3 Nano Omni",
+    "nemotron-3.5-content-safety-free": "Nemotron 3.5 Safety",
+    "nemotron-3-nano-30b-a3b-free": "Nemotron 3 Nano 30B",
 }
+
+# 已知可用的 free 模型 (无使用记录也显示, 便于查看有哪些免费模型可用)
+KNOWN_FREE_MODELS = [
+    "nemotron-3-nano-omni-30b-a3b-reasoning-free",
+    "nemotron-3.5-content-safety-free",
+    "nemotron-3-nano-30b-a3b-free",
+    "nemotron-3-super-120b-a12b-free",
+    "nemotron-3-ultra-550b-a55b-free",
+    "gemma-4-31b-it-free",
+    "ling-3.0-flash-free",
+    "north-mini-code-free",
+]
 
 FREE_SUFFIXES = ("-free", ":free", "/free")
 FREE_WHITELIST = {"big-pickle", "hy3", "hy3-preview"}
@@ -118,6 +133,12 @@ PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
                 "tencent-tokenhub": "zen", "openrouter": "router"}
 # 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
 PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai"}
+
+# 模型别名: 不同来源/写法的同一模型合并 (key -> 规范名)
+MODEL_ALIASES = {
+    "nemotron-3-ultra-free": "nemotron-3-ultra-550b-a55b-free",
+    "nemotron-3-nano-omni-30b-a3b-reasoning-free": "nemotron-3-nano-omni-30b-a3b-reasoning-free",
+}
 
 
 def is_free_model(model):
@@ -144,7 +165,7 @@ def norm_model(model):
     base = m[:-5] if m.endswith("-free") else m
     if base in FREE_WHITELIST:
         return base
-    return m
+    return MODEL_ALIASES.get(m, m)
 
 
 def load_config():
@@ -458,6 +479,24 @@ def model_stats(rows, now_ms, cost_map=None):
             "est_req_cost": est_req_cost,
             "est_tok_cost": est_tok_cost,
         })
+    # 注入已知 free 模型 (无使用记录也显示)
+    existing = {x["model"] for x in out}
+    for fm in KNOWN_FREE_MODELS:
+        if fm not in existing:
+            out.append({
+                "model": fm, "source": "known", "key": f"{fm}|free",
+                "is_free": True, "group": "free",
+                "name": DISPLAY_NAMES.get(fm, fm),
+                "count_s": 0, "count_w": 0, "count_m": 0,
+                "cost_s": 0.0, "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
+                "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
+                "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,
+                "tokens_in_w": 0, "tokens_out_w": 0, "tokens_cache_w": 0,
+                "tokens_in_m": 0, "tokens_out_m": 0, "tokens_cache_m": 0,
+                "tq_s": 0.0, "tq_w": 0.0, "tq_m": 0.0,
+                "tp_s": 0.0, "tp_w": 0.0, "tp_m": 0.0,
+                "req_lim": None, "est_req_cost": 0.0, "est_tok_cost": 0.0,
+            })
     out.sort(key=lambda x: -x["count_s"])
     return out
 
