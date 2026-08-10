@@ -1001,7 +1001,7 @@ class Api:
         return True
 
     def get_opacity(self):
-        return self.cfg.get("opacity", 0.7)
+        return self.cfg.get("opacity", 0.72)
 
     def save_opacity(self, v):
         val = max(0.1, min(1.0, float(v)))
@@ -1109,6 +1109,11 @@ class Api:
         try:
             if self._win is not None:
                 self._win.resize(w, h)
+                # resize 后立即恢复透明 layered 样式 (不等 watcher 轮询)
+                user32 = ctypes.windll.user32
+                hwnd = user32.FindWindowW(None, "Go \u7528\u91cf")
+                if hwnd:
+                    _set_layered(hwnd)
                 return True
         except Exception:
             pass
@@ -1138,7 +1143,7 @@ def _set_layered(hwnd):
 def _enable_layered_watcher():
     def run():
         user32 = ctypes.windll.user32
-        for _ in range(60):
+        while True:
             for title in ("Go \u7528\u91cf", "Go Console"):
                 hwnd = user32.FindWindowW(None, title)
                 if hwnd:

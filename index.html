@@ -5,7 +5,7 @@
 <title>Go 用量</title>
 <style>
   :root {
-    --alpha: 0.7;
+    --alpha: 0.72;
     --bg: rgba(13, 17, 28, var(--alpha));
     --panel: rgba(22, 28, 42, calc(var(--alpha) + 0.04));
     --panel-2: rgba(26, 33, 50, calc(var(--alpha) + 0.06));
@@ -212,7 +212,7 @@
     <div style="display:flex;align-items:center;gap:10px">
       <div class="op-wrap">
         <span class="op-label" id="opLabel">30%</span>
-        <input type="range" id="opSlider" min="10" max="100" value="70" title="透明度">
+        <input type="range" id="opSlider" min="10" max="100" value="72" title="透明度">
       </div>
       <div class="status"><span class="dot" id="keyDot"></span><span id="keyText">…</span></div>
       <div class="win-btns">
@@ -895,7 +895,7 @@ async function initOpacity() {
   try {
     if (!window.pywebview || !window.pywebview.api) { setTimeout(initOpacity, 500); return; }
     const v = await window.pywebview.api.get_opacity();
-    applyOpacity(v || 0.7);
+    applyOpacity(v || 0.72);
   } catch (_) { setTimeout(initOpacity, 500); }
 }
 document.addEventListener("DOMContentLoaded", () => {
