@@ -5,7 +5,7 @@
 <title>Go 用量</title>
 <style>
   :root {
-    --alpha: 0.72;
+    --alpha: 0.75;
     --bg: rgba(13, 17, 28, var(--alpha));
     --panel: rgba(24, 30, 46, 0.97);
     --panel-2: rgba(28, 35, 54, 0.97);
@@ -125,10 +125,16 @@
   .s-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .s-sup { font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-model { font-size: 11px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-mstats { display: grid; grid-template-columns: auto auto; gap: 1px 12px; font-size: 9.5px; color: var(--dim); margin-top: 2px; }
+  .s-mstats b { color: var(--text); font-weight: 600; margin-left: 3px; }
   .s-hint { font-size: 9px; color: var(--faded); letter-spacing: 0.5px; }
   .s-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 10px; color: var(--dim); flex-shrink: 0; }
   .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--glass); border: 1px solid var(--border); border-radius: 7px; }
   .s-grid .sg b { color: var(--text); font-weight: 700; }
+  /* 小窗圆环内文字缩小, 避免与圆环重叠 */
+  .small .rc .label { font-size: calc(6.5px * var(--scale, 1)); margin-top: calc(-13px * var(--scale, 1)); }
+  .small .rc .amount { font-size: 13px; font-weight: 600; }
+  .small .ring-sub { font-size: 7.5px; }
 
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
@@ -239,7 +245,7 @@
     <!-- small (最小化: 圆环 + 供应商/模型 + 迷你统计) -->
     <div class="small" id="smallView">
       <div class="s-top">
-        <div class="ringbox" style="width:150px;height:120px">
+        <div class="ringbox" style="width:165px;height:135px">
           <svg viewBox="0 0 118 118">
             <circle class="ring ring-track" cx="59" cy="59" r="28"/>
             <circle class="ring ring-track" cx="59" cy="59" r="41"/>
@@ -258,6 +264,7 @@
         <div class="s-info">
           <div class="s-sup" id="sSupplier">OpenCode Go</div>
           <div class="s-model" id="sModel">—</div>
+          <div class="s-mstats" id="sMStats"></div>
           <div class="s-hint" id="sHint">←→ 供应商 · ↑↓ 模型</div>
         </div>
       </div>
@@ -404,7 +411,7 @@ const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]]
 const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
 const RING_KEYS = ["session", "weekly", "monthly"];
 const RING_R = [28, 41, 52];
-const COMPACT_H = 480, EXPAND_W = 960, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 170;
+const COMPACT_H = 480, EXPAND_W = 960, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 260;
 
 const SUPPLIER_ORDER = ["go", "zen", "kilo", "router"];
 const SUPPLIER_NAMES = { go: "OpenCode Go", zen: "OpenCode Zen", kilo: "Kilo", router: "OpenRouter" };
@@ -800,11 +807,28 @@ function renderSmall() {
   $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
   $("#sSub").textContent = state.suppliers[selSupplier] ? money(agg.cost) + " · " + agg.count + "次" : "";
   $("#sSupplier").textContent = SUPPLIER_NAMES[selSupplier] || selSupplier;
-  // 模型: 当前供应商下用量最多的模型
-  const srcStats = state.stats.filter(x => x.source === selSupplier || (x.source || "").includes(selSupplier));
-  const sortedM = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0));
-  const topM = sortedM[0];
-  $("#sModel").textContent = topM ? `${topM.name} · ${fmtTokens(topM.count_total || 0)} 次` : "—";
+  // 模型: 键盘选中的 selModel 优先, 否则当前供应商下用量最多的模型
+  let curModel = selModel ? state.stats.find(x => x.key === selModel) : null;
+  if (!curModel) {
+    const srcStats = state.stats.filter(x => x.source === selSupplier || (x.source || "").includes(selSupplier));
+    curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0))[0] || null;
+  }
+  $("#sModel").textContent = curModel ? `${curModel.name} · ${(curModel.count_total || 0).toLocaleString()} 次` : "—";
+  // 当前模型补充指标 (右侧, 供应商/模型下方)
+  const mstats = $("#sMStats");
+  if (mstats) {
+    if (curModel) {
+      const mTok = (curModel.tokens_in || 0) + (curModel.tokens_out || 0) + (curModel.tokens_cache || 0);
+      const mCost = curModel.cost_total || 0;
+      const hit = (curModel.cache_hit || 0).toFixed(1) + "%";
+      const sess = (curModel.sessions || 0) + " 个";
+      mstats.innerHTML =
+        `<span>Token<b>${fmtTokens(mTok)}</b></span><span>费用<b>${money(mCost)}</b></span>` +
+        `<span>命中<b>${hit}</b></span><span>会话<b>${sess}</b></span>`;
+    } else {
+      mstats.innerHTML = "";
+    }
+  }
   const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
   const rows = [
     ["总Token", fmtTokens(agg.tokens), "总费用", money(agg.cost)],

@@ -1044,7 +1044,7 @@ class Api:
         return True
 
     def get_opacity(self):
-        return self.cfg.get("opacity", 0.7)
+        return self.cfg.get("opacity", 0.75)
 
     def save_opacity(self, v):
         val = max(0.1, min(1.0, float(v)))
@@ -1201,12 +1201,12 @@ def _rebuild_layered_hit_test(win):
 def _enable_layered_watcher():
     def run():
         user32 = ctypes.windll.user32
-        for _ in range(60):
+        while True:
             for title in ("Go \u7528\u91cf", "Go Console"):
                 hwnd = user32.FindWindowW(None, title)
                 if hwnd:
                     _set_layered(hwnd)
-            time.sleep(0.5)
+            time.sleep(1.0)
 
     threading.Thread(target=run, daemon=True).start()
 
