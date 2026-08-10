@@ -524,7 +524,8 @@ function renderTabs() {
 function filteredStats() {
   let st = state.stats;
   if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
-  if (selSupplier && uiState !== "mid") st = st.filter(x => (x.source || "").includes(selSupplier));
+  // free 模型跨供应商共享 (source 为组合如 "kilo/router/zen"), 不按供应商过滤
+  if (selSupplier && uiState !== "mid" && mFilter !== "free") st = st.filter(x => (x.source || "").includes(selSupplier));
   return st;
 }
 

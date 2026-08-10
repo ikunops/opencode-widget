@@ -187,10 +187,6 @@ def scan_free_models(cfg=None, force=False):
     return models
 PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
                 "tencent-tokenhub": "zen", "openrouter": "router"}
-# 供应商显示名 (src -> 名称), 小窗/大窗供应商切换用
-SUPPLIER_NAMES = {"go": "OpenCode Go", "zen": "OpenCode Zen",
-                  "kilo": "Kilo", "router": "OpenRouter"}
-SUPPLIER_ORDER = ["go", "zen", "kilo", "router"]
 # 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
 PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai",
                      "opencode", "openkilo", "openrouter", "poolside", "stepfun", "openai"}
@@ -622,6 +618,11 @@ def model_history(rows, days=14):
     return out
 
 
+SUPPLIER_NAMES = {"go": "OpenCode Go", "zen": "OpenCode Zen",
+                  "kilo": "Kilo", "router": "OpenRouter"}
+SUPPLIER_ORDER = ["go", "zen", "kilo", "router"]
+
+
 def supplier_stats(rows):
     """按供应商聚合全量统计 (小窗 + 大窗汇总)。
     返回 {src: {tokens, cost, input, output, cache, count, days}}, 含 "all" 合计。"""
@@ -1001,15 +1002,17 @@ class Api:
         return True
 
     def get_opacity(self):
-        return self.cfg.get("opacity", 0.72)
+        return self.cfg.get("opacity", 0.7)
 
     def save_opacity(self, v):
         val = max(0.1, min(1.0, float(v)))
         self.cfg["opacity"] = val
         save_config(self.cfg)
+        _apply_lwa_opacity(self._win, val)
         return True
 
     def apply_opacity(self):
+        _apply_lwa_opacity(self._win, self.cfg.get("opacity", 0.7))
         return True
 
     def get_ui_state(self):
@@ -1109,11 +1112,7 @@ class Api:
         try:
             if self._win is not None:
                 self._win.resize(w, h)
-                # resize 后立即恢复透明 layered 样式 (不等 watcher 轮询)
-                user32 = ctypes.windll.user32
-                hwnd = user32.FindWindowW(None, "Go \u7528\u91cf")
-                if hwnd:
-                    _set_layered(hwnd)
+                _rebuild_layered_hit_test(self._win)
                 return True
         except Exception:
             pass
@@ -1140,10 +1139,52 @@ def _set_layered(hwnd):
         pass
 
 
+def _rebuild_layered_hit_test(win):
+    """resize 后 WebView2 的合成表面（alpha 命中区域）不会跟随新尺寸，
+    导致新区域点击穿透。同步翻转 WS_EX_LAYERED 强制系统重建分层表面。"""
+    try:
+        native = getattr(win, "native", None)
+        if native is None or not getattr(native, "Handle", None):
+            return
+        hwnd = native.Handle.ToInt32()
+        user32 = ctypes.windll.user32
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if ex & WS_EX_LAYERED:
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
+        # toggle 会清掉分层属性, 重新应用窗口透明度
+        try:
+            import webview as _w
+            opacity = load_config().get("opacity", 0.7)
+            _apply_lwa_opacity(win, opacity)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _apply_lwa_opacity(win, opacity):
+    """用 SetLayeredWindowAttributes(LWA_ALPHA) 做真正的窗口级透明度。
+    WebView2 透明背景 + 窗体实色 BackColor 组合下, 页面 --alpha 只影响内容层,
+    窗口整体穿透由 LWA_ALPHA 控制 (低透明度 = 更透明看到桌面, 不再是白底)。"""
+    try:
+        native = getattr(win, "native", None)
+        if native is None or not getattr(native, "Handle", None):
+            return
+        hwnd = native.Handle.ToInt32()
+        user32 = ctypes.windll.user32
+        alpha = max(0, min(255, int(round(opacity * 255))))
+        user32.SetLayeredWindowAttributes(hwnd, 0, alpha, 0x2)
+    except Exception:
+        pass
+
+
 def _enable_layered_watcher():
     def run():
         user32 = ctypes.windll.user32
-        while True:
+        for _ in range(60):
             for title in ("Go \u7528\u91cf", "Go Console"):
                 hwnd = user32.FindWindowW(None, title)
                 if hwnd:
