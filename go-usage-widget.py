@@ -437,7 +437,8 @@ def model_stats(rows, now_ms, cost_map=None):
         free = is_free_model(nm) or (cost_by_model.get(nm, 0.0) <= 0)
         key = (nm, "free") if free else (nm, "go")
         if key not in stats:
-            stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
+            stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "count_total": 0,
+                          "cost_s": 0.0,
                           "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
                           "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
                           "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,
@@ -446,6 +447,7 @@ def model_stats(rows, now_ms, cost_map=None):
                           "srcs": set()}
         s = stats[key]
         s["srcs"].add(src)
+        s["count_total"] += 1
         if session_start <= r["ts"] < now_ms:
             s["count_s"] += 1
             if r["cost"] is not None:
@@ -528,6 +530,7 @@ def model_stats(rows, now_ms, cost_map=None):
             "group": group,
             "name": name,
             "count_s": s["count_s"], "count_w": s["count_w"], "count_m": s["count_m"],
+            "count_total": s["count_total"],
             "cost_s": s["cost_s"], "cost_w": s["cost_w"], "cost_m": s["cost_m"],
             "cost_total": s["cost_total"],
             "tokens_in": s["tokens_in"], "tokens_out": s["tokens_out"],
@@ -551,7 +554,7 @@ def model_stats(rows, now_ms, cost_map=None):
                 "is_free": True, "group": "free",
                 "name": DISPLAY_NAMES.get(fm, fm),
                 "used": False,
-                "count_s": 0, "count_w": 0, "count_m": 0,
+                "count_s": 0, "count_w": 0, "count_m": 0, "count_total": 0,
                 "cost_s": 0.0, "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
                 "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
                 "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,

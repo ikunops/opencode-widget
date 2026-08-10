@@ -500,7 +500,12 @@ function fillModelList(el, key) {
       extra = pct > 0 ? `${fmtPct(pct)} · ${fmtTokens(totalTok)} tok` : "";
     } else if (isFree) {
       // free 模型无配额: 跟随时间周期, 进度条为模型间相对占比, 不显示百分比/配额数字
-      const fv = isTok ? windowTokens(x, mode) : (x[key] || 0);
+      // 总览模式: 用本地历史全量 (count_total / tokens 全量), 不按本月
+      const isOverview = state.mode === "overview";
+      const fv = isTok
+        ? (isOverview ? ((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0))
+                      : windowTokens(x, mode))
+        : (isOverview ? (x.count_total || 0) : (x[key] || 0));
       main = isTok ? fmtTokens(fv) : fv + "次";
       barPct = total > 0 ? Math.min(100, fv / total * 100) : 0;
       extra = unused ? "未使用" : "";
@@ -594,10 +599,12 @@ function renderStats() {
   ds.innerHTML = "";
   const key = modelKey();
   const st = filteredStats();
+  const isOverview = state.mode === "overview";
   const mode = state.mode === "weekly" ? "weekly" : state.mode === "monthly" ? "monthly" : "session";
   const costKey = mode === "weekly" ? "cost_w" : mode === "monthly" ? "cost_m" : "cost_s";
-  const periodLabel = mode === "weekly" ? "周" : mode === "monthly" ? "月" : "5h";
-  const totalReq = st.reduce((a, x) => a + (x[key] || 0), 0);
+  const periodLabel = isOverview ? "累计" : (mode === "weekly" ? "周" : mode === "monthly" ? "月" : "5h");
+  const reqOf = x => (x.group === "free" && isOverview) ? (x.count_total || 0) : (x[key] || 0);
+  const totalReq = st.reduce((a, x) => a + reqOf(x), 0);
   const totalCost = st.reduce((a, x) => a + (x[costKey] || 0), 0);
   const totalTok = st.reduce((a, x) => a + (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0), 0);
   [["请求数", totalReq + " 次"], [periodLabel + "费用", money(totalCost)], ["模型数", st.length + " 个"]].forEach(([k, v]) => {
