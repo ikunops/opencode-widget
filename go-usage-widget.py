@@ -299,13 +299,18 @@ def read_opencode_all(srcs=None):
             t = (d.get("time") or {}).get("created")
             if not t:
                 continue
+            t_completed = (d.get("time") or {}).get("completed")
             cost = d.get("cost")
+            dur_ms = None
+            if isinstance(t_completed, (int, float)) and t_completed > int(t):
+                dur_ms = int(t_completed) - int(t)
             rows.append({
                 "ts": int(t),
                 "cost": float(cost) if isinstance(cost, (int, float)) else 0.0,
                 "model": d.get("modelID") or "?",
                 "tokens": d.get("tokens") or {},
                 "src": src,
+                "dur_ms": dur_ms,
             })
         conn.close()
     except Exception:
@@ -420,6 +425,7 @@ def build_windows(rows, now_ms):
 def model_stats(rows, now_ms, cost_map=None):
     cost_map = cost_map or {}
     stats = {}
+    rows = sorted(rows, key=lambda r: r.get("ts") or 0)  # session 聚类依赖时间有序
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
     paid_rows = [r for r in rows if r.get("cost")]
@@ -444,10 +450,32 @@ def model_stats(rows, now_ms, cost_map=None):
                           "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,
                           "tokens_in_w": 0, "tokens_out_w": 0, "tokens_cache_w": 0,
                           "tokens_in_m": 0, "tokens_out_m": 0, "tokens_cache_m": 0,
+                          "cache_read": 0, "cache_write": 0,
+                          "sessions": 0, "prompts": 0,
+                          "tok_sec_sum": 0.0, "tok_sec_n": 0,
+                          "last_ts": None, "prev_ts": None,
+                          "days": set(),
                           "srcs": set()}
         s = stats[key]
         s["srcs"].add(src)
+        s["days"].add(datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d"))
         s["count_total"] += 1
+        # session 聚类: 同模型相邻请求间隔 > 30min 计为新会话
+        if s["last_ts"] is None:
+            s["sessions"] = 1  # 首个请求计 1 个会话
+        elif (r["ts"] - s["last_ts"]) > 30 * 60 * 1000:
+            s["sessions"] += 1
+        s["last_ts"] = r["ts"]
+        # prompts 近似: 每次有输入 token 的请求计为一个 prompt
+        tk = r.get("tokens") or {}
+        if (tk.get("input") or 0) > 0:
+            s["prompts"] += 1
+        dur = r.get("dur_ms")
+        if dur and dur > 0:
+            tok_sum = (tk.get("input") or 0) + (tk.get("output") or 0) + (tk.get("cache") or {}).get("read", 0) or 0
+            if tok_sum > 0:
+                s["tok_sec_sum"] += tok_sum / (dur / 1000.0)
+                s["tok_sec_n"] += 1
         if session_start <= r["ts"] < now_ms:
             s["count_s"] += 1
             if r["cost"] is not None:
@@ -468,6 +496,8 @@ def model_stats(rows, now_ms, cost_map=None):
         s["tokens_in"] += ti
         s["tokens_out"] += to
         s["tokens_cache"] += tc
+        s["cache_read"] += cache.get("read", 0) or 0
+        s["cache_write"] += cache.get("write", 0) or 0
         if session_start <= r["ts"] < now_ms:
             s["tokens_in_s"] += ti
             s["tokens_out_s"] += to
@@ -543,6 +573,14 @@ def model_stats(rows, now_ms, cost_map=None):
             "req_lim": req_lim,
             "est_req_cost": est_req_cost,
             "est_tok_cost": est_tok_cost,
+            "sessions": s["sessions"],
+            "prompts": s["prompts"],
+            "days": len(s["days"]),
+            "rate": round(s["tok_sec_sum"] / s["tok_sec_n"], 1) if s["tok_sec_n"] else 0.0,
+            "cache_read": s["cache_read"],
+            "cache_write": s["cache_write"],
+            "cache_hit": round(s["cache_read"] / (s["cache_read"] + s["tokens_in"]) * 100, 2)
+                        if (s["cache_read"] + s["tokens_in"]) > 0 else 0.0,
         })
     # 注入扫描到的 free 模型 (无使用记录也显示, 带 used 标记)
     existing = {x["model"] for x in out}
@@ -563,6 +601,10 @@ def model_stats(rows, now_ms, cost_map=None):
                 "tq_s": 0.0, "tq_w": 0.0, "tq_m": 0.0,
                 "tp_s": 0.0, "tp_w": 0.0, "tp_m": 0.0,
                 "req_lim": None, "est_req_cost": 0.0, "est_tok_cost": 0.0,
+                "sessions": 0, "prompts": 0,
+                "days": 0,
+                "rate": 0.0,
+                "cache_read": 0, "cache_write": 0, "cache_hit": 0.0,
             })
     for x in out:
         if x["group"] == "free" and "used" not in x:
@@ -844,7 +886,7 @@ class Api:
             self.windows = build_windows(self.rows, now_ms)
             self._apply_calibration(self.windows, now_ms)
             self.stats = model_stats(self.rows, now_ms, cost_map)
-            self.history = model_history(self.rows)
+            self.history = model_history(self.rows, days=90)
             self.suppliers = supplier_stats(self.rows)
             self.heatmap = heatmap(self.rows)
             self.last_refresh = now_ms
@@ -1008,11 +1050,9 @@ class Api:
         val = max(0.1, min(1.0, float(v)))
         self.cfg["opacity"] = val
         save_config(self.cfg)
-        _apply_lwa_opacity(self._win, val)
         return True
 
     def apply_opacity(self):
-        _apply_lwa_opacity(self._win, self.cfg.get("opacity", 0.7))
         return True
 
     def get_ui_state(self):
@@ -1154,29 +1194,6 @@ def _rebuild_layered_hit_test(win):
         if ex & WS_EX_LAYERED:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
-        # toggle 会清掉分层属性, 重新应用窗口透明度
-        try:
-            import webview as _w
-            opacity = load_config().get("opacity", 0.7)
-            _apply_lwa_opacity(win, opacity)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
-def _apply_lwa_opacity(win, opacity):
-    """用 SetLayeredWindowAttributes(LWA_ALPHA) 做真正的窗口级透明度。
-    WebView2 透明背景 + 窗体实色 BackColor 组合下, 页面 --alpha 只影响内容层,
-    窗口整体穿透由 LWA_ALPHA 控制 (低透明度 = 更透明看到桌面, 不再是白底)。"""
-    try:
-        native = getattr(win, "native", None)
-        if native is None or not getattr(native, "Handle", None):
-            return
-        hwnd = native.Handle.ToInt32()
-        user32 = ctypes.windll.user32
-        alpha = max(0, min(255, int(round(opacity * 255))))
-        user32.SetLayeredWindowAttributes(hwnd, 0, alpha, 0x2)
     except Exception:
         pass
 

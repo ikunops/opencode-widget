@@ -7,8 +7,8 @@
   :root {
     --alpha: 0.72;
     --bg: rgba(13, 17, 28, var(--alpha));
-    --panel: rgba(22, 28, 42, calc(var(--alpha) + 0.04));
-    --panel-2: rgba(26, 33, 50, calc(var(--alpha) + 0.06));
+    --panel: rgba(24, 30, 46, 0.97);
+    --panel-2: rgba(28, 35, 54, 0.97);
     --border: rgba(255, 255, 255, 0.08);
     --border-light: rgba(255, 255, 255, 0.14);
     --text: #e8ebf4;
@@ -98,18 +98,24 @@
   .m-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
   .m-list::-webkit-scrollbar { width: 4px; }
   .m-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
-  .m-item { display: flex; align-items: center; padding: 4px 8px; border-radius: 7px; cursor: pointer; transition: background .12s; font-size: 11px; }
+  .m-item { display: flex; align-items: center; padding: 5px 10px; border-radius: 8px; cursor: pointer; transition: background .12s; font-size: 12px; font-weight: 400; }
   .m-item.unused { opacity: 0.45; }
-  .m-item.unused .nm { color: var(--faded); font-weight: 500; }
+  .m-item.unused .nm { color: var(--faded); font-weight: 400; }
   .m-item.unused .bar i { background: rgba(148,163,184,0.35); }
   .m-item:hover { background: rgba(255,255,255,0.05); }
   .m-item.sel { background: rgba(99,102,241,0.16); }
-  .m-item .nm { color: var(--text); font-weight: 600; min-width: 130px; }
-  .m-item .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--track); margin: 0 8px; overflow: hidden; }
+  .m-item .nm { color: var(--text); font-weight: 500; min-width: 130px; }
+  .m-item .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--track); margin: 0 10px; overflow: hidden; }
   .m-item .bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--violet)); }
-  .m-item .cnt { color: var(--dim); font-size: 10px; min-width: 40px; text-align: right; }
-  .m-item .rem { color: var(--cyan); font-size: 9px; margin-left: 5px; }
-  .m-item .sub { color: var(--faded); font-size: 9px; margin-left: 5px; }
+  .m-item .cnt { color: var(--dim); font-size: 11px; font-weight: 400; min-width: 44px; text-align: right; }
+  .m-item .rem { color: var(--cyan); font-size: 10px; margin-left: 6px; }
+  .m-item .sub { color: var(--faded); font-size: 10px; margin-left: 6px; }
+  .d-list-card .m-item { padding: 7px 12px; font-size: 13px; }
+  .d-list-card .m-item .nm { min-width: 160px; font-weight: 500; }
+  .d-list-card .m-item .cnt { font-size: 12px; }
+  .d-list-card .m-item .bar { height: 4px; margin: 0 12px; }
+  .d-list-card .m-item .sub { font-size: 11px; }
+  .d-list-card .m-item .rem { font-size: 11px; }
 
   /* ---- small (最小化) ---- */
   .small { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 6px; }
@@ -138,41 +144,46 @@
   .l-sub { font-size: 9px; color: var(--faded); display: flex; justify-content: space-between; }
 
   /* ---- expanded dashboard (大窗) ---- */
-  .dash { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 7px; }
+  .dash { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 8px; }
   .dash.on { display: flex; }
   .d-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
-  .d-sup-tabs { display: flex; gap: 4px; }
-  .d-sup-tabs .sup-tab { padding: 4px 12px; border-radius: 8px; font-size: 10.5px; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .d-sup-tabs { display: flex; gap: 5px; }
+  .d-sup-tabs .sup-tab { padding: 5px 14px; border-radius: 9px; font-size: 12px; font-weight: 400; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; letter-spacing: 0.3px; }
   .d-sup-tabs .sup-tab:hover { border-color: var(--border-light); color: var(--text); }
   .d-sup-tabs .sup-tab.on { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.45); color: #c7c9ff; }
-  .d-range { display: flex; gap: 4px; }
-  .d-range .r-btn { padding: 4px 10px; border-radius: 8px; font-size: 10px; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .d-range { display: flex; gap: 5px; }
+  .d-range .r-btn { padding: 5px 12px; border-radius: 9px; font-size: 11.5px; font-weight: 400; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
   .d-range .r-btn.on { background: rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.4); color: #a5f3fc; }
 
-  .d-stats-row { display: flex; gap: 7px; flex-shrink: 0; }
-  .stat-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; }
-  .stat-card .sk { font-size: 8.5px; color: var(--faded); }
-  .stat-card .sv { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 1px; white-space: nowrap; }
-  .stat-card .sv small { font-size: 9px; color: var(--dim); font-weight: 600; }
+  .d-stats-row { display: flex; gap: 8px; flex-shrink: 0; }
+  .stat-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 8px 12px; }
+  .stat-card .sk { font-size: 10px; font-weight: 400; color: var(--faded); letter-spacing: 0.3px; }
+  .stat-card .sv { font-size: 17px; font-weight: 500; color: var(--text); margin-top: 2px; white-space: nowrap; }
+  .stat-card .sv small { font-size: 10px; color: var(--dim); font-weight: 400; }
 
-  .d-heat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; flex-shrink: 0; overflow: hidden; }
-  .heat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-  .heat-title { font-size: 10.5px; font-weight: 700; color: var(--text); }
-  .heat-legend { display: flex; align-items: center; gap: 3px; font-size: 8.5px; color: var(--faded); }
-  .heat-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .d-heat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 9px 12px; flex-shrink: 0; overflow: hidden; }
+  .heat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .heat-title { font-size: 12px; font-weight: 500; color: var(--text); }
+  .heat-legend { display: flex; align-items: center; gap: 3px; font-size: 9.5px; color: var(--faded); }
+  .heat-legend i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
   .heat-wrap { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 2px; }
   .heat-col { display: flex; flex-direction: column; gap: 3px; }
-  .heat-cell { width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0; }
-  .heat-dow { display: flex; flex-direction: column; gap: 3px; margin-right: 2px; font-size: 7.5px; color: var(--faded); }
-  .heat-dow span { height: 13px; line-height: 13px; }
+  .heat-cell { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .heat-dow { display: flex; flex-direction: column; gap: 3px; margin-right: 2px; font-size: 8.5px; color: var(--faded); }
+  .heat-dow span { height: 14px; line-height: 14px; }
 
-  .d-bottom { flex: 1; display: flex; gap: 7px; min-height: 0; }
-  .d-chart { flex: 1 1 58%; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  .chart-title { font-size: 11px; color: var(--text); font-weight: 600; text-align: center; flex-shrink: 0; }
-  .chart-note { font-size: 9px; color: var(--faded); text-align: center; flex-shrink: 0; }
+  .d-bottom { flex: 1; display: flex; gap: 8px; min-height: 0; }
+  .d-chart { flex: 1 1 58%; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .chart-title { font-size: 12.5px; color: var(--text); font-weight: 500; text-align: center; flex-shrink: 0; letter-spacing: 0.3px; }
+  .chart-note { font-size: 10px; color: var(--faded); text-align: center; flex-shrink: 0; }
   .d-chart svg { flex: 1 1 auto; width: 100%; min-height: 0; }
-  .d-list-card { flex: 1 1 42%; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  .d-list-card .m-head { padding: 0 0 5px; flex-shrink: 0; }
+  .d-detail { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px; margin: 4px 0 2px;
+    background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: 9px; flex-shrink: 0; }
+  .d-detail-name { width: 100%; font-size: 11.5px; font-weight: 500; color: #a5b4fc; }
+  .d-detail-cell { font-size: 10px; color: var(--dim); display: inline-flex; gap: 4px; align-items: baseline; }
+  .d-detail-cell b { color: var(--text); font-weight: 500; }
+  .d-list-card { flex: 1 1 42%; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .d-list-card .m-head { padding: 0 0 6px; flex-shrink: 0; }
   .d-list-card .m-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
   footer { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px 9px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--faded); flex-shrink: 0; }
@@ -305,6 +316,7 @@
         <div class="d-chart">
           <div class="chart-title" id="dChartTitle">点击模型查看曲线</div>
           <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
+          <div class="d-detail" id="dModelDetail"></div>
           <svg id="dChartSvg" viewBox="0 0 400 180" preserveAspectRatio="none"></svg>
         </div>
         <div class="d-list-card">
@@ -524,8 +536,8 @@ function renderTabs() {
 function filteredStats() {
   let st = state.stats;
   if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
-  // free 模型跨供应商共享 (source 为组合如 "kilo/router/zen"), 不按供应商过滤
-  if (selSupplier && uiState !== "mid" && mFilter !== "free") st = st.filter(x => (x.source || "").includes(selSupplier));
+  // 供应商过滤只作用于显式选 "go" 时; "全部"/"free" 显示所有 (free 跨供应商共享)
+  if (mFilter === "go" && selSupplier && uiState !== "mid") st = st.filter(x => (x.source || "").includes(selSupplier));
   return st;
 }
 
@@ -638,41 +650,105 @@ function renderLimits() {
 function renderChart() {
   const svg = $("#dChartSvg");
   const note = $("#chartNote");
-  if (!selModel) { svg.innerHTML = ""; $("#dChartTitle").textContent = "点击左侧模型查看曲线"; if (note) note.textContent = "近 14 天费用(USD)"; return; }
+  const title = $("#dChartTitle");
+  const detail = $("#dModelDetail");
+  if (!selModel) { svg.innerHTML = ""; title.textContent = "点击模型查看曲线"; if (note) note.textContent = "费用/Token 曲线"; if (detail) detail.innerHTML = ""; return; }
   const selKey = String(selModel);
   const item = state.history.find(h => (h.key || h.model) === selKey) ||
                state.history.find(h => selKey.startsWith((h.model || "") + "|"));
-  if (!item || !item.series.length) { svg.innerHTML = ""; $("#dChartTitle").textContent = "暂无历史数据"; return; }
+  // 模型详情条
+  const statItem = state.stats.find(x => x.key === selKey) ||
+                   state.stats.find(x => selKey.startsWith((x.model || "") + "|"));
+  if (detail && statItem) {
+    const s = statItem;
+    const tot = (s.tokens_in || 0) + (s.tokens_out || 0) + (s.tokens_cache || 0);
+    const cells = [
+      ["总Token", fmtTokens(tot)],
+      ["费用", money(s.cost_total || 0)],
+      ["输入", fmtTokens(s.tokens_in || 0)],
+      ["输出", fmtTokens(s.tokens_out || 0)],
+      ["缓存", fmtTokens(s.tokens_cache || 0)],
+      ["缓存命中", (s.cache_hit || 0).toFixed(1) + "%"],
+      ["速率", (s.rate || 0) > 0 ? (s.rate || 0).toFixed(1) + " tok/s" : "—"],
+      ["会话", (s.sessions || 0) + " 个"],
+      ["请求", (s.count_total || 0) + " 次"],
+      ["提示词", (s.prompts || 0) + " 条"],
+      ["活跃", (s.days || 0) + " 天"],
+    ];
+    detail.innerHTML = `<div class="d-detail-name">${s.name || s.model}</div>` +
+      cells.map(([k, v]) => `<span class="d-detail-cell"><b>${k}</b>${v}</span>`).join("");
+  }
+  if (!item || !item.series.length) { svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = ""; return; }
   const isFree = !!item.is_free;
-  if (note) note.textContent = isFree ? "近 14 天 Token(含缓存)" : "近 14 天费用(USD)";
-  const pts = item.series;
-  const W = 400, H = 180, PAD_L = 40, PAD_B = 18, PAD_T = 10, PAD_R = 10;
+  // 跟随右上角天数: 7/30/all
+  const days = heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
+  let pts = item.series;
+  if (days > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(5, 10);
+    const today = new Date();
+    const todayStr = today.toISOString().slice(5, 10);
+    pts = pts.filter(p => {
+      const m = String(p.date);
+      if (m.length === 5) {
+        if (m > todayStr) return false;
+        const cy = today.getFullYear();
+        return (cy + "-" + m) >= (cutoff.getFullYear() + "-" + cutoffStr);
+      }
+      return p.date >= cutoff.toISOString().slice(0, 10);
+    });
+  }
+  if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
+  const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
+  if (note) note.textContent = isFree ? `${rngLabel} Token(含缓存)` : `${rngLabel} 费用(USD)`;
+  const W = 400, H = 180, PAD_L = 42, PAD_B = 18, PAD_T = 10, PAD_R = 12;
   const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out + p.tokens_cache) : p.cost);
   const maxV = Math.max(...vals, isFree ? 1 : 0.0001);
   const stepX = (W - PAD_L - PAD_R) / Math.max(1, pts.length - 1);
   const y = (v) => H - PAD_B - (v / maxV) * (H - PAD_T - PAD_B);
   const x = (i) => PAD_L + i * stepX;
-  const fmtV = (v) => isFree ? fmtTokens(v) : v.toFixed(3);
+  const fmtV = (v) => isFree ? fmtTokens(v) : (v >= 1 ? "$" + v.toFixed(2) : "$" + v.toFixed(3));
   let inner = "";
+  // 网格 + 刻度
   for (let g = 0; g <= 4; g++) {
     const gy = PAD_T + (H - PAD_T - PAD_B) * g / 4;
-    inner += `<line x1="${PAD_L}" y1="${gy}" x2="${W-PAD_R}" y2="${gy}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
-    inner += `<text x="${PAD_L-4}" y="${gy+3}" fill="#8a93a6" font-size="8" text-anchor="end">${fmtV(maxV*(1-g/4))}</text>`;
+    inner += `<line x1="${PAD_L}" y1="${gy}" x2="${W-PAD_R}" y2="${gy}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+    inner += `<text x="${PAD_L-5}" y="${gy+3}" fill="#8a93a6" font-size="7.5" text-anchor="end">${fmtV(maxV*(1-g/4))}</text>`;
   }
-  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(vals[i]).toFixed(1)}`).join(" ");
+  // 平滑曲线 (Catmull-Rom -> Bezier)
+  let line = "";
+  for (let i = 0; i < pts.length; i++) {
+    const px = x(i), py = y(vals[i]);
+    if (i === 0) { line += `M${px.toFixed(1)},${py.toFixed(1)}`; continue; }
+    const p0x = x(i - 1), p0y = y(vals[i - 1]);
+    const cp1x = p0x + (px - p0x) / 2, cp1y = p0y;
+    const cp2x = px - (px - p0x) / 2, cp2y = py;
+    line += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${px.toFixed(1)},${py.toFixed(1)}`;
+  }
   const area = line + ` L${x(pts.length-1).toFixed(1)},${H-PAD_B} L${x(0).toFixed(1)},${H-PAD_B} Z`;
-  inner += `<path d="${area}" fill="url(#gfill)" opacity="0.5"/>`;
-  inner += `<path d="${line}" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round"/>`;
-  const labelStep = Math.max(1, Math.ceil(pts.length / 7));
+  const gradId = "gfill" + (isFree ? "f" : "c");
+  inner += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>`;
+  inner += `<path d="${area}" fill="url(#${gradId})"/>`;
+  inner += `<path d="${line}" fill="none" stroke="#818cf8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // 数据点 + tooltip
+  const labelStep = Math.max(1, Math.ceil(pts.length / 8));
   pts.forEach((p, i) => {
+    const px = x(i), py = y(vals[i]);
+    const tip = `${p.date} · ${isFree ? fmtTokens(vals[i]) + " tok" : "$" + vals[i].toFixed(3)}${p.count ? " · " + p.count + "次" : ""}`;
     if (i % labelStep === 0 || i === pts.length - 1) {
-      inner += `<text x="${x(i)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${p.date}</text>`;
+      inner += `<text x="${px}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${p.date}</text>`;
+    }
+    if (pts.length <= 60) {
+      inner += `<circle cx="${px}" cy="${py}" r="2" fill="#a5b4fc" opacity="0.9"><title>${tip}</title></circle>`;
+    } else {
+      inner += `<rect x="${px-2}" y="${py-2}" width="4" height="4" fill="#a5b4fc" opacity="0.7"><title>${tip}</title></rect>`;
     }
   });
-  svg.innerHTML = `<defs><linearGradient id="gfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.5"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>${inner}`;
+  svg.innerHTML = inner;
   const total = vals.reduce((a, v) => a + v, 0);
   const maxP = Math.max(...vals);
-  $("#dChartTitle").textContent = `${item.name} · 14天 ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
+  title.textContent = `${item.name} · ${rngLabel} ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
 }
 
 function renderStats() {
@@ -959,8 +1035,7 @@ function cycleSupplier(dir) {
 }
 function cycleModel(dir) {
   const key = "count_total";
-  const list = state.stats
-    .filter(x => !selSupplier || (x.source || "").includes(selSupplier))
+  const list = filteredStats()
     .sort((a, b) => (b[key] || 0) - (a[key] || 0))
     .map(x => x.key);
   if (!list.length) return;
