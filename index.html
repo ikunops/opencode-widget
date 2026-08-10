@@ -137,20 +137,43 @@
   .l-bar i { display: block; height: 100%; border-radius: 3px; }
   .l-sub { font-size: 9px; color: var(--faded); display: flex; justify-content: space-between; }
 
-  .d-body { flex: 1; display: flex; gap: 8px; min-height: 0; }
-  .d-left { flex: 1 1 46%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; overflow: hidden; }
-  .d-left .m-head { padding: 0 0 5px; flex-shrink: 0; }
-  .d-left .m-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-  .d-right { flex: 1 1 54%; display: flex; flex-direction: column; min-height: 0; gap: 8px; min-width: 0; }
-  .d-heat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; flex-shrink: 0; }
-  .d-chart { flex: 1 1 70%; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  /* ---- expanded dashboard (大窗) ---- */
+  .dash { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 7px; }
+  .dash.on { display: flex; }
+  .d-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+  .d-sup-tabs { display: flex; gap: 4px; }
+  .d-sup-tabs .sup-tab { padding: 4px 12px; border-radius: 8px; font-size: 10.5px; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .d-sup-tabs .sup-tab:hover { border-color: var(--border-light); color: var(--text); }
+  .d-sup-tabs .sup-tab.on { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.45); color: #c7c9ff; }
+  .d-range { display: flex; gap: 4px; }
+  .d-range .r-btn { padding: 4px 10px; border-radius: 8px; font-size: 10px; color: var(--dim); background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .d-range .r-btn.on { background: rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.4); color: #a5f3fc; }
+
+  .d-stats-row { display: flex; gap: 7px; flex-shrink: 0; }
+  .stat-card { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; }
+  .stat-card .sk { font-size: 8.5px; color: var(--faded); }
+  .stat-card .sv { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 1px; white-space: nowrap; }
+  .stat-card .sv small { font-size: 9px; color: var(--dim); font-weight: 600; }
+
+  .d-heat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; flex-shrink: 0; overflow: hidden; }
+  .heat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .heat-title { font-size: 10.5px; font-weight: 700; color: var(--text); }
+  .heat-legend { display: flex; align-items: center; gap: 3px; font-size: 8.5px; color: var(--faded); }
+  .heat-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .heat-wrap { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 2px; }
+  .heat-col { display: flex; flex-direction: column; gap: 3px; }
+  .heat-cell { width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0; }
+  .heat-dow { display: flex; flex-direction: column; gap: 3px; margin-right: 2px; font-size: 7.5px; color: var(--faded); }
+  .heat-dow span { height: 13px; line-height: 13px; }
+
+  .d-bottom { flex: 1; display: flex; gap: 7px; min-height: 0; }
+  .d-chart { flex: 1 1 58%; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .chart-title { font-size: 11px; color: var(--text); font-weight: 600; text-align: center; flex-shrink: 0; }
   .chart-note { font-size: 9px; color: var(--faded); text-align: center; flex-shrink: 0; }
   .d-chart svg { flex: 1 1 auto; width: 100%; min-height: 0; }
-  .d-stats { display: flex; gap: 8px; flex-shrink: 0; }
-  .s-chip { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; text-align: center; }
-  .s-v { font-size: 14px; font-weight: 800; color: var(--text); }
-  .s-k { font-size: 9px; color: var(--faded); }
+  .d-list-card { flex: 1 1 42%; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .d-list-card .m-head { padding: 0 0 5px; flex-shrink: 0; }
+  .d-list-card .m-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
   footer { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px 9px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--faded); flex-shrink: 0; }
   .cal-badge { color: var(--green); }
@@ -210,9 +233,9 @@
             <circle class="ring ring-track" cx="59" cy="59" r="41"/>
             <circle class="ring ring-track" cx="59" cy="59" r="52"/>
             <circle class="ring ring-badge" cx="59" cy="59" r="18"/>
-            <circle class="ring r0" id="ring0" cx="59" cy="59" r="28"/>
-            <circle class="ring r1" id="ring1" cx="59" cy="59" r="41"/>
-            <circle class="ring r2" id="ring2" cx="59" cy="59" r="52"/>
+            <circle class="ring r0" id="sring0" cx="59" cy="59" r="28"/>
+            <circle class="ring r1" id="sring1" cx="59" cy="59" r="41"/>
+            <circle class="ring r2" id="sring2" cx="59" cy="59" r="52"/>
           </svg>
           <div class="rc">
             <span class="label" id="sLabel">总用量</span>
@@ -270,14 +293,24 @@
       </div>
     </div>
 
-    <!-- expanded -->
+    <!-- expanded (大窗) -->
     <div class="dash" id="dashView">
-      <div class="d-limits" id="dLimits"></div>
-      <div class="d-body">
-        <div class="d-left">
+      <div class="d-toolbar">
+        <div class="d-sup-tabs" id="dSupTabs"></div>
+        <div class="d-range" id="dRange"></div>
+      </div>
+      <div class="d-stats-row" id="dStatsRow"></div>
+      <div class="d-heat-card" id="dHeatmap"></div>
+      <div class="d-bottom">
+        <div class="d-chart">
+          <div class="chart-title" id="dChartTitle">点击模型查看曲线</div>
+          <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
+          <svg id="dChartSvg" viewBox="0 0 400 180" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="d-list-card">
           <div class="m-head">
             <div class="m-head-top">
-              <span class="m-title">模型用量</span>
+              <span class="m-title">模型明细</span>
               <span class="m-count" id="dCount"></span>
             </div>
             <div class="m-head-bar">
@@ -290,15 +323,6 @@
             </div>
           </div>
           <div class="m-list" id="dList"></div>
-        </div>
-        <div class="d-right">
-          <div class="d-heat" id="dHeatmap"></div>
-          <div class="d-chart">
-            <div class="chart-title" id="dChartTitle">点击左侧模型查看曲线</div>
-            <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
-            <svg id="dChartSvg" viewBox="0 0 300 150" preserveAspectRatio="none"></svg>
-          </div>
-          <div class="d-stats" id="dStats"></div>
         </div>
       </div>
     </div>
@@ -367,7 +391,7 @@ const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]]
 const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
 const RING_KEYS = ["session", "weekly", "monthly"];
 const RING_R = [28, 41, 52];
-const COMPACT_H = 480, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 170;
+const COMPACT_H = 480, EXPAND_W = 960, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 170;
 
 const SUPPLIER_ORDER = ["go", "zen", "kilo", "router"];
 const SUPPLIER_NAMES = { go: "OpenCode Go", zen: "OpenCode Zen", kilo: "Kilo", router: "OpenRouter" };
@@ -377,6 +401,7 @@ let lastCal = null;
 let uiState = "mid";   // small | mid | large
 let selModel = null;
 let selSupplier = null; // null = 全部
+let heatRange = "30";    // 热力图范围: 7 | 30 | all
 let mFilter = "all";
 let mUnit = "count";
 
@@ -415,10 +440,13 @@ function displayWindows() {
 function win(kind) { return displayWindows().find(x => x.kind === kind); }
 function circ(r) { return 2 * Math.PI * r; }
 function setRing(i, pct) {
-  const el = $("#ring" + i);
   const c = circ(RING_R[i]);
-  el.style.strokeDasharray = c;
-  el.style.strokeDashoffset = c * (1 - Math.min(100, pct) / 100);
+  ["ring" + i, "sring" + i].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.strokeDasharray = c;
+    el.style.strokeDashoffset = c * (1 - Math.min(100, pct) / 100);
+  });
 }
 function ringColor(pct) { return pct >= 95 ? "#ef4444" : pct >= 70 ? "#f59e0b" : RING_COLORS[0]; }
 function periodName(kind) { return PERIODS[RING_KEYS.indexOf(kind)][0]; }
@@ -452,7 +480,7 @@ function render() {
   }
   fitAmount();
   setRing(0, s.pct); setRing(1, w.pct); setRing(2, m.pct);
-  renderSide(); renderTabs(); renderModels(); renderLimits(); renderChart(); renderStats();
+  renderSide(); renderTabs(); renderModels(); renderChart();
   renderSmall();
   renderLarge();
   const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
@@ -617,7 +645,7 @@ function renderChart() {
   const isFree = !!item.is_free;
   if (note) note.textContent = isFree ? "近 14 天 Token(含缓存)" : "近 14 天费用(USD)";
   const pts = item.series;
-  const W = 300, H = 150, PAD_L = 36, PAD_B = 16, PAD_T = 8, PAD_R = 8;
+  const W = 400, H = 180, PAD_L = 40, PAD_B = 18, PAD_T = 10, PAD_R = 10;
   const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out + p.tokens_cache) : p.cost);
   const maxV = Math.max(...vals, isFree ? 1 : 0.0001);
   const stepX = (W - PAD_L - PAD_R) / Math.max(1, pts.length - 1);
@@ -710,35 +738,99 @@ function renderSmall() {
     `<div class="sg"><span>${a} <b>${b}</b></span><span>${c} <b>${d}</b></span></div>`).join("");
 }
 
+const HEAT_COLORS = ["#1a2333", "#2b3a67", "#3f55a8", "#6366f1", "#8b8bf5", "#a5a5ff"];
+
 function heatColor(v, max) {
-  if (max <= 0 || v <= 0) return "rgba(148,163,184,0.08)";
-  const t = Math.pow(v / max, 0.5);
-  return `rgba(99,102,241,${0.15 + 0.85 * t})`;
+  if (max <= 0 || v <= 0) return HEAT_COLORS[0];
+  const t = v / max;
+  const idx = Math.min(HEAT_COLORS.length - 1, 1 + Math.floor(t * (HEAT_COLORS.length - 2)));
+  return HEAT_COLORS[idx];
 }
 
 function renderLarge() {
   const box = $("#dHeatmap");
   if (!box) return;
   const list = activeSuppliers();
-  const src = selSupplier && list.includes(selSupplier) ? selSupplier : list[0];
-  const srcName = SUPPLIER_NAMES[src] || src;
-  // 热力图数据: 取该供应商按天 (全量), 最近 30 天为主, 少于 30 天则全量
-  const rows = state.heatmap.filter(x => x.src === src);
+  const src = selSupplier && list.includes(selSupplier) ? selSupplier : "all";
+  const srcName = src === "all" ? "全部供应商" : (SUPPLIER_NAMES[src] || src);
+  const agg = src === "all" ? allAgg() : supAgg(src);
+
+  // ---- 供应商 tabs ----
+  const tabs = $("#dSupTabs");
+  if (tabs) {
+    tabs.innerHTML = [["all", "全部"], ...list.map(s => [s, SUPPLIER_NAMES[s] || s])]
+      .map(([s, n]) => `<button class="sup-tab${src === s ? " on" : ""}" data-sup="${s}">${n}</button>`).join("");
+    tabs.querySelectorAll(".sup-tab").forEach(b => {
+      b.onclick = () => { selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup; render(); };
+    });
+  }
+
+  // ---- 时间范围 ----
+  const range = $("#dRange");
+  if (range) {
+    range.innerHTML = [["7", "7天"], ["30", "30天"], ["all", "全部"]]
+      .map(([v, n]) => `<button class="r-btn${heatRange === v ? " on" : ""}" data-r="${v}">${n}</button>`).join("");
+    range.querySelectorAll(".r-btn").forEach(b => {
+      b.onclick = () => { heatRange = b.dataset.r; render(); };
+    });
+  }
+
+  // ---- 统计卡 ----
+  const row = $("#dStatsRow");
+  if (row) {
+    const cards = [
+      ["总Token", fmtTokens(agg.tokens)],
+      ["总费用", money(agg.cost)],
+      ["请求数", (agg.count || 0) + " 次"],
+      ["输入", fmtTokens(agg.input)],
+      ["输出", fmtTokens(agg.output)],
+      ["缓存", fmtTokens(agg.cache)],
+      ["活跃天数", (agg.days || 0) + " 天"],
+    ];
+    row.innerHTML = cards.map(([k, v]) =>
+      `<div class="stat-card"><div class="sk">${k}</div><div class="sv">${v}</div></div>`).join("");
+  }
+
+  // ---- GitHub 风格热力图 (周列日历) ----
+  const rows = state.heatmap.filter(x => src === "all" || x.src === src);
   const byDate = {};
   rows.forEach(x => { byDate[x.date] = { count: x.count, tokens: x.tokens, cost: x.cost }; });
-  const dates = Object.keys(byDate).sort().slice(-30);
-  const maxV = Math.max(1, ...dates.map(d => byDate[d].tokens || 0));
-  let html = `<div style="font-size:11px;color:var(--text);font-weight:700;margin-bottom:4px">${srcName} · 热力图 (近 ${dates.length} 天)</div>`;
-  html += `<div style="display:flex;flex-wrap:wrap;gap:3px">`;
-  dates.forEach(d => {
-    const v = byDate[d];
-    html += `<div title="${d} · ${v.count}次 · ${fmtTokens(v.tokens)} tok" style="width:14px;height:14px;border-radius:3px;background:${heatColor(v.tokens, maxV)}"></div>`;
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  let start = new Date();
+  if (heatRange === "7") start.setDate(start.getDate() - 6);
+  else if (heatRange === "30") start.setDate(start.getDate() - 29);
+  else {
+    const dates = Object.keys(byDate).sort();
+    start = dates.length ? new Date(dates[0]) : new Date();
+  }
+  // 对齐到周日 (周起始)
+  start.setDate(start.getDate() - start.getDay());
+  const days = [];
+  for (let d = new Date(start); d <= now; d.setDate(d.getDate() + 1)) {
+    days.push(d.toISOString().slice(0, 10));
+  }
+  // 分组成周列
+  const weeks = [];
+  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+  const maxV = Math.max(1, ...Object.values(byDate).map(v => v.tokens || 0));
+  const DOW = ["日", "一", "二", "三", "四", "五", "六"];
+  let h = `<div class="heat-head"><span class="heat-title">${srcName} · 使用热力图</span><span class="heat-legend">少 <i style="background:${HEAT_COLORS[0]}"></i><i style="background:${HEAT_COLORS[1]}"></i><i style="background:${HEAT_COLORS[2]}"></i><i style="background:${HEAT_COLORS[3]}"></i><i style="background:${HEAT_COLORS[4]}"></i><i style="background:${HEAT_COLORS[5]}"></i> 多</span></div>`;
+  h += `<div class="heat-wrap"><div class="heat-dow">${DOW.map(d => `<span>${d}</span>`).join("")}</div>`;
+  weeks.forEach(week => {
+    h += `<div class="heat-col">`;
+    for (let d = 0; d < 7; d++) {
+      const date = week[d];
+      if (!date) { h += `<div class="heat-cell" style="background:transparent"></div>`; continue; }
+      const v = byDate[date];
+      const col = v ? heatColor(v.tokens, maxV) : HEAT_COLORS[0];
+      const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${v.cost.toFixed(4)}` : date + " · 无使用";
+      h += `<div class="heat-cell" title="${tip}" style="background:${col}"></div>`;
+    }
+    h += `</div>`;
   });
-  html += `</div>`;
-  html += `<div style="display:flex;gap:6px;margin-top:4px;font-size:8.5px;color:var(--faded)">`;
-  html += `共 ${dates.length} 天 · ${fmtTokens((supAgg(src).tokens))} tok · $${supAgg(src).cost.toFixed(2)}`;
-  html += `</div>`;
-  box.innerHTML = html;
+  h += `</div>`;
+  box.innerHTML = h;
 }
 
 async function refresh() {
@@ -770,7 +862,7 @@ function setUiState(v) {
   if (v === "small") {
     window.pywebview.api.resize_window(SMALL_W, SMALL_H);
   } else {
-    window.pywebview.api.resize_window(560, onLarge ? EXPAND_H : COMPACT_H);
+    window.pywebview.api.resize_window(onLarge ? EXPAND_W : 560, onLarge ? EXPAND_H : COMPACT_H);
   }
   try { window.pywebview.api.save_ui_state(v); } catch (_) {}
   setTimeout(() => render(), 250);
