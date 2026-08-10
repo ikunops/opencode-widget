@@ -113,26 +113,83 @@ DISPLAY_NAMES = {
     "nemotron-3-nano-omni-30b-a3b-reasoning-free": "Nemotron 3 Nano Omni",
     "nemotron-3.5-content-safety-free": "Nemotron 3.5 Safety",
     "nemotron-3-nano-30b-a3b-free": "Nemotron 3 Nano 30B",
+    "laguna-s-2.1-free": "Laguna S 2.1",
+    "laguna-xs-2.1-free": "Laguna XS 2.1",
+    "step-3.7-flash-free": "Step 3.7 Flash",
+    "longcat-2.0-free": "Longcat 2.0",
+    "ling-3.0-tiny-free": "Ling 3.0 Tiny",
+    "gemma-4-26b-a4b-it-free": "Gemma 4 26B",
+    "nemotron-nano-12b-v2-vl-free": "Nemotron Nano 12B VL",
+    "nemotron-nano-9b-v2-free": "Nemotron Nano 9B",
+    "gpt-oss-20b-free": "GPT-OSS 20B",
+    "deepseek-v4-flash-free": "DeepSeek V4 Flash",
+    "mimo-v2.5-free": "MiMo-V2.5",
 }
-
-# 已知可用的 free 模型 (无使用记录也显示, 便于查看有哪些免费模型可用)
-KNOWN_FREE_MODELS = [
-    "nemotron-3-nano-omni-30b-a3b-reasoning-free",
-    "nemotron-3.5-content-safety-free",
-    "nemotron-3-nano-30b-a3b-free",
-    "nemotron-3-super-120b-a12b-free",
-    "nemotron-3-ultra-550b-a55b-free",
-    "gemma-4-31b-it-free",
-    "ling-3.0-flash-free",
-    "north-mini-code-free",
-]
 
 FREE_SUFFIXES = ("-free", ":free", "/free")
 FREE_WHITELIST = {"big-pickle", "hy3", "hy3-preview"}
+
+# 排除项: 路由占位/非真实模型 (不以 free 后缀过滤它们, 单独排除)
+FREE_EXCLUDE = {"openrouter/free", "kilo-auto/free", "openrouter-free"}
+
+# 动态扫描 opencode 模型列表中的 free 模型 (缓存到 config, TTL 6h)
+_FREE_SCAN_TTL = 6 * 3600 * 1000
+
+
+def scan_free_models(cfg=None, force=False):
+    """调用 `opencode models` 解析所有带 free 后缀的模型, 返回归一化后的规范名列表。
+    结果缓存到 config["free_models_cache"] (含时间戳), TTL 内不重复调用 CLI。
+    特殊免费模型 (big-pickle/hy3 等, 不带 free 后缀) 由 FREE_WHITELIST 补充。"""
+    cfg = cfg if cfg is not None else load_config()
+    cached = cfg.get("free_models_cache") or {}
+    if not force and cached.get("ts") and (time.time() * 1000 - cached["ts"] < _FREE_SCAN_TTL):
+        return list(cached.get("models") or [])
+    models = set()
+    try:
+        import subprocess
+        # 优先 npm 全局的 opencode.cmd (python 子进程 PATH 通常不含 npm 目录)
+        candidates = [
+            os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm", "opencode.cmd"),
+            "opencode.cmd",
+            "opencode",
+        ]
+        out = None
+        for cand in candidates:
+            try:
+                out = subprocess.run([cand, "models"], capture_output=True, text=True,
+                                     timeout=30, encoding="utf-8", errors="replace",
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if out.returncode == 0:
+                    break
+            except Exception:
+                continue
+        if out and out.returncode == 0:
+            for line in (out.stdout or "").splitlines():
+                line = line.strip()
+                if not line or "/" not in line:
+                    continue
+                low = line.lower()
+                if any(s in low for s in FREE_SUFFIXES):
+                    nm = norm_model(line)
+                    if nm and nm not in FREE_EXCLUDE and nm != "free" and not nm.startswith("openrouter-"):
+                        models.add(nm)
+    except Exception:
+        pass
+    # 补充特殊免费模型 (无 free 后缀)
+    for w in FREE_WHITELIST:
+        models.add(w)
+    models = sorted(models)
+    try:
+        cfg["free_models_cache"] = {"ts": int(time.time() * 1000), "models": models}
+        save_config(cfg)
+    except Exception:
+        pass
+    return models
 PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
                 "tencent-tokenhub": "zen", "openrouter": "router"}
 # 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
-PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai"}
+PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai",
+                     "opencode", "openkilo", "openrouter", "poolside", "stepfun", "openai"}
 
 # 模型别名: 不同来源/写法的同一模型合并 (key -> 规范名)
 MODEL_ALIASES = {
@@ -157,10 +214,15 @@ def norm_model(model):
     注意: kilo-auto/free 的 kilo-auto 是模型名一部分, 不是 provider 前缀, 故保留。
     若去 free 后缀后的基类在 FREE_WHITELIST 中 (如 hy3), 则进一步去掉 -free, 使 hy3-free 与 hy3 合并。"""
     m = (model or "").strip()
-    for p in PROVIDER_PREFIXES:
-        if m.startswith(p + "/"):
-            m = m[len(p) + 1:]
-            break
+    # 循环剥已知 provider 前缀 (支持 openkilo/nvidia/... 多层)
+    changed = True
+    while changed:
+        changed = False
+        for p in PROVIDER_PREFIXES:
+            if m.startswith(p + "/"):
+                m = m[len(p) + 1:]
+                changed = True
+                break
     m = m.replace(":free", "-free").replace("/free", "-free")
     base = m[:-5] if m.endswith("-free") else m
     if base in FREE_WHITELIST:
@@ -479,14 +541,16 @@ def model_stats(rows, now_ms, cost_map=None):
             "est_req_cost": est_req_cost,
             "est_tok_cost": est_tok_cost,
         })
-    # 注入已知 free 模型 (无使用记录也显示)
+    # 注入扫描到的 free 模型 (无使用记录也显示, 带 used 标记)
     existing = {x["model"] for x in out}
-    for fm in KNOWN_FREE_MODELS:
+    free_list = scan_free_models()
+    for fm in free_list:
         if fm not in existing:
             out.append({
                 "model": fm, "source": "known", "key": f"{fm}|free",
                 "is_free": True, "group": "free",
                 "name": DISPLAY_NAMES.get(fm, fm),
+                "used": False,
                 "count_s": 0, "count_w": 0, "count_m": 0,
                 "cost_s": 0.0, "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
                 "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
@@ -497,6 +561,9 @@ def model_stats(rows, now_ms, cost_map=None):
                 "tp_s": 0.0, "tp_w": 0.0, "tp_m": 0.0,
                 "req_lim": None, "est_req_cost": 0.0, "est_tok_cost": 0.0,
             })
+    for x in out:
+        if x["group"] == "free" and "used" not in x:
+            x["used"] = True
     out.sort(key=lambda x: -x["count_s"])
     return out
 

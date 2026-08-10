@@ -99,6 +99,9 @@
   .m-list::-webkit-scrollbar { width: 4px; }
   .m-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
   .m-item { display: flex; align-items: center; padding: 4px 8px; border-radius: 7px; cursor: pointer; transition: background .12s; font-size: 11px; }
+  .m-item.unused { opacity: 0.45; }
+  .m-item.unused .nm { color: var(--faded); font-weight: 500; }
+  .m-item.unused .bar i { background: rgba(148,163,184,0.35); }
   .m-item:hover { background: rgba(255,255,255,0.05); }
   .m-item.sel { background: rgba(99,102,241,0.16); }
   .m-item .nm { color: var(--text); font-weight: 600; min-width: 130px; }
@@ -463,11 +466,12 @@ function fillModelList(el, key) {
   sorted.forEach(x => {
     const div = document.createElement("div");
     const mKey = x.key || x.model;
-    div.className = "m-item" + (selModel === mKey ? " sel" : "") + (x.group === "free" ? " free" : "");
-    const val = modelValue(x, key);
     const isTok = mUnit === "token";
-    const isQuota = x.group === "go" && !isTok;
     const isFree = x.group === "free";
+    const unused = isFree && x.used === false;
+    div.className = "m-item" + (selModel === mKey ? " sel" : "") + (isFree ? " free" : "") + (unused ? " unused" : "");
+    const val = modelValue(x, key);
+    const isQuota = x.group === "go" && !isTok;
     let main = isTok ? fmtTokens(val) : val + "次";
     let barPct = 0, extra = "", rem = "";
     if (isQuota) {
@@ -495,9 +499,11 @@ function fillModelList(el, key) {
       barPct = pct;
       extra = pct > 0 ? `${fmtPct(pct)} · ${fmtTokens(totalTok)} tok` : "";
     } else if (isFree) {
-      // free 模型无配额: 进度条仅表示相对使用量 (占所有模型合计), 不显示百分比/配额数字
-      barPct = Math.min(100, val / total * 100);
-      extra = "";
+      // free 模型无配额: 跟随时间周期, 进度条为模型间相对占比, 不显示百分比/配额数字
+      const fv = isTok ? windowTokens(x, mode) : (x[key] || 0);
+      main = isTok ? fmtTokens(fv) : fv + "次";
+      barPct = total > 0 ? Math.min(100, fv / total * 100) : 0;
+      extra = unused ? "未使用" : "";
     } else {
       barPct = Math.min(100, val / total * 100);
       extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
@@ -514,8 +520,12 @@ function renderModels() {
   fillModelList($("#cList"), key);
   fillModelList($("#dList"), key);
   const n = filteredStats().length;
-  $("#cCount").textContent = n + " 个模型";
-  $("#dCount").textContent = n + " 个模型";
+  const freeAll = state.stats.filter(x => x.group === "free").length;
+  const freeUsed = state.stats.filter(x => x.group === "free" && x.used !== false).length;
+  let label = n + " 个模型";
+  if (freeAll > 0) label += ` · free ${freeUsed}/${freeAll}`;
+  $("#cCount").textContent = label;
+  $("#dCount").textContent = label;
   document.querySelectorAll(".unit-btn").forEach(b => {
     b.classList.toggle("on", mUnit === "token");
     b.textContent = mUnit === "token" ? "Token" : "次数";
