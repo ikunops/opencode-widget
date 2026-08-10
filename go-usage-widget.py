@@ -73,18 +73,51 @@ REQ_LIMITS = {
     "hy3":               (4300, 10750, 21500),
 }
 
+# 官方"每次请求 token 数"估算 (输入 + 缓存 + 输出), 用于未使用模型的剩余折算
+TOKENS_PER_REQ = {
+    "grok-4.5":          1100 + 71500 + 220,
+    "gpt-5.6-luna":      1000 + 50000 + 220,
+    "glm-5.2":           700 + 52000 + 150,
+    "glm-5.1":           700 + 52000 + 150,
+    "kimi-k3":           1050 + 76500 + 300,
+    "kimi-k2.7-code":    870 + 55000 + 200,
+    "kimi-k2.6":         870 + 55000 + 200,
+    "mimo-v2.5":         830 + 71500 + 295,
+    "mimo-v2.5-pro":     790 + 86000 + 305,
+    "minimax-m3":        510 + 56000 + 190,
+    "minimax-m2.7":      300 + 55000 + 125,
+    "qwen3.8-max":       420 + 66000 + 200,
+    "qwen3.7-max":       420 + 66000 + 200,
+    "qwen3.7-plus":      500 + 57000 + 190,
+    "qwen3.6-plus":      500 + 57000 + 190,
+    "deepseek-v4-pro":   750 + 82000 + 290,
+    "deepseek-v4-flash": 790 + 68000 + 280,
+    "hy3":               830 + 71500 + 295,
+}
+
 DISPLAY_NAMES = {
     "grok-4.5": "Grok 4.5", "gpt-5.6-luna": "GPT 5.6 Luna", "glm-5.2": "GLM-5.2",
     "glm-5.1": "GLM-5.1", "kimi-k3": "Kimi K3", "kimi-k2.7-code": "Kimi K2.7 Code",
-    "kimi-k2.6": "Kimi K2.6", "mimo-v2.5": "MiMo-V2.5", "mimo-v2.5-pro": "MiMo-V2.5-Pro",
+    "kimi-k2.6": "Kimi K2.6", "mimo-v2.5": "MiMo-V2.5", "mimo-v2.5-pro": "MiMo-V2.5 Pro", "mimo-v2.5-free": "MiMo-V2.5",
     "minimax-m3": "MiniMax M3", "minimax-m2.7": "MiniMax M2.7", "qwen3.8-max": "Qwen3.8 Max",
     "qwen3.7-max": "Qwen3.7 Max", "qwen3.7-plus": "Qwen3.7 Plus", "qwen3.6-plus": "Qwen3.6 Plus",
     "deepseek-v4-pro": "DeepSeek V4 Pro", "deepseek-v4-flash": "DeepSeek V4 Flash", "hy3": "Hy3",
+    "hy3-free": "Hy3", "hy3:free": "Hy3", "tencent/hy3:free": "Hy3",
+    "ling-3.0-flash-free": "Ling 3.0 Flash", "nemotron-3-ultra-free": "Nemotron 3 Ultra",
+    "cohere/north-mini-code:free": "North Mini Code", "north-mini-code-free": "North Mini Code",
+    "google/lyria-3-pro-preview": "Lyria 3 Pro", "kilo-auto-free": "Kilo Auto",
+    "nemotron-3-ultra-550b-a55b-free": "Nemotron 3 Ultra 550B",
+    "nemotron-3-super-120b-a12b-free": "Nemotron 3 Super 120B", "gemma-4-31b-it-free": "Gemma 4 31B",
+    "hy3-preview": "Hy3 Preview",
+    "big-pickle": "Big Pickle",
 }
 
 FREE_SUFFIXES = ("-free", ":free", "/free")
-FREE_WHITELIST = {"big-pickle"}
-PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo"}
+FREE_WHITELIST = {"big-pickle", "hy3", "hy3-preview"}
+PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
+                "tencent-tokenhub": "zen", "openrouter": "router"}
+# 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
+PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai"}
 
 
 def is_free_model(model):
@@ -94,6 +127,24 @@ def is_free_model(model):
     if m in FREE_WHITELIST:
         return True
     return any(s in m for s in FREE_SUFFIXES)
+
+
+def norm_model(model):
+    """归一化模型名: 仅剥离已知的 provider 前缀 (tencent/, cohere/, nvidia/...),
+    并统一 free 标记, 使同一模型的不同来源/写法合并为一条
+    (如 hy3-free / tencent/hy3:free / hy3:free -> hy3-free)。
+    注意: kilo-auto/free 的 kilo-auto 是模型名一部分, 不是 provider 前缀, 故保留。
+    若去 free 后缀后的基类在 FREE_WHITELIST 中 (如 hy3), 则进一步去掉 -free, 使 hy3-free 与 hy3 合并。"""
+    m = (model or "").strip()
+    for p in PROVIDER_PREFIXES:
+        if m.startswith(p + "/"):
+            m = m[len(p) + 1:]
+            break
+    m = m.replace(":free", "-free").replace("/free", "-free")
+    base = m[:-5] if m.endswith("-free") else m
+    if base in FREE_WHITELIST:
+        return base
+    return m
 
 
 def load_config():
@@ -258,7 +309,8 @@ def month_bounds(now_ms, subscribe_ms):
 
 def build_windows(rows, now_ms):
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
-    earliest = min((t for t, _ in costs), default=now_ms)
+    paid = [(t, c) for t, c in costs if c]
+    earliest = min((t for t, _ in paid), default=now_ms)
 
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
@@ -287,17 +339,30 @@ def model_stats(rows, now_ms, cost_map=None):
     stats = {}
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
-    ms, me = month_bounds(now_ms, min((r["ts"] for r in rows), default=now_ms))
+    paid_rows = [r for r in rows if r.get("cost")]
+    ms, me = month_bounds(now_ms, min((r["ts"] for r in paid_rows), default=now_ms))
+    # 先统计每个模型的总 cost: 有付费记录的模型归 go 组, 完全无 cost 的归 free (如 kilo 音频模型)
+    cost_by_model = {}
+    for r in rows:
+        nm = norm_model(r["model"])
+        if r.get("cost"):
+            cost_by_model[nm] = cost_by_model.get(nm, 0.0) + r["cost"]
     for r in rows:
         m = r["model"]
+        nm = norm_model(m)
         src = r.get("src") or "?"
-        free = is_free_model(m)
-        key = (m, src) if free else (m, "go")
+        free = is_free_model(nm) or (cost_by_model.get(nm, 0.0) <= 0)
+        key = (nm, "free") if free else (nm, "go")
         if key not in stats:
             stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "cost_s": 0.0,
                           "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
-                          "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0}
+                          "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
+                          "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,
+                          "tokens_in_w": 0, "tokens_out_w": 0, "tokens_cache_w": 0,
+                          "tokens_in_m": 0, "tokens_out_m": 0, "tokens_cache_m": 0,
+                          "srcs": set()}
         s = stats[key]
+        s["srcs"].add(src)
         if session_start <= r["ts"] < now_ms:
             s["count_s"] += 1
             if r["cost"] is not None:
@@ -311,32 +376,71 @@ def model_stats(rows, now_ms, cost_map=None):
             if r["cost"] is not None:
                 s["cost_m"] += r["cost"]
         tk = r.get("tokens") or {}
-        s["tokens_in"] += tk.get("input", 0) or 0
-        s["tokens_out"] += tk.get("output", 0) or 0
+        ti = tk.get("input", 0) or 0
+        to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
-        s["tokens_cache"] += (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
+        tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
+        s["tokens_in"] += ti
+        s["tokens_out"] += to
+        s["tokens_cache"] += tc
+        if session_start <= r["ts"] < now_ms:
+            s["tokens_in_s"] += ti
+            s["tokens_out_s"] += to
+            s["tokens_cache_s"] += tc
+        if ws <= r["ts"] < we:
+            s["tokens_in_w"] += ti
+            s["tokens_out_w"] += to
+            s["tokens_cache_w"] += tc
+        if ms <= r["ts"] < me:
+            s["tokens_in_m"] += ti
+            s["tokens_out_m"] += to
+            s["tokens_cache_m"] += tc
         if r["cost"] is not None:
             s["cost_total"] += r["cost"]
 
     src_count = {}
-    for (m, src) in stats:
-        if is_free_model(m):
+    for (m, grp) in stats:
+        if grp == "free":
             src_count[m] = src_count.get(m, 0) + 1
 
     out = []
-    for (m, src), s in stats.items():
-        is_free = is_free_model(m)
+    for (m, grp), s in stats.items():
+        is_free = (grp == "free")
         group = "free" if is_free else "go"
-        name = DISPLAY_NAMES.get(m, m)
+        base = m.replace("-free", "").replace(":free", "")
+        name = DISPLAY_NAMES.get(m) or DISPLAY_NAMES.get(base) or base
         if is_free and src_count.get(m, 0) > 1:
-            name = f"{name} ({src})"
-        if not is_free and m in cost_map:
-            s["cost_total"] = cost_map[m]
-            s["cost_m"] = cost_map[m]
+            name = f"{name} ({len(s['srcs'])})"
+        if not is_free:
+            if m in cost_map:
+                s["cost_total"] = cost_map[m]
+            # 反推 token 配额: go 模型只有 $60/月 费用配额, 用当月均价换算 token 配额
+            # 用行级当月费用 (与 tokens_m 同一窗口), 避免 cost_map 跨月汇总导致比例失真
+            monthly_cost = s["cost_m"] if s["cost_m"] > 0 else cost_map.get(m, 0)
+            monthly_tok = s["tokens_in_m"] + s["tokens_out_m"] + s["tokens_cache_m"]
+            if monthly_tok > 0 and monthly_cost > 0:
+                avg = monthly_cost / monthly_tok  # USD / token
+                cq_m = 60.0
+                cq_w = 60.0 / 4.345
+                cq_s = 60.0 / (30 * 24 / 5)
+                s["tq_m"] = cq_m / avg
+                s["tq_w"] = cq_w / avg
+                s["tq_s"] = cq_s / avg
+                tok_m = monthly_tok
+                tok_w = s["tokens_in_w"] + s["tokens_out_w"] + s["tokens_cache_w"]
+                tok_s = s["tokens_in_s"] + s["tokens_out_s"] + s["tokens_cache_s"]
+                s["tp_m"] = min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0 
+                s["tp_w"] = min(100.0, tok_w / s["tq_w"] * 100) if s["tq_w"] else 0.0
+                s["tp_s"] = min(100.0, tok_s / s["tq_s"] * 100) if s["tq_s"] else 0.0
+        out_srcs = sorted(s["srcs"])
+        # 官方估算: 次均费用 = 月配额$60 / 官方月请求数; 每 token 费用 = 次均 / 官方每次请求 token
+        req_lim = REQ_LIMITS.get(m)
+        est_req_cost = (60.0 / req_lim[2]) if req_lim and req_lim[2] else 0.0
+        est_tok_cost = (est_req_cost / TOKENS_PER_REQ[m]) if (m in TOKENS_PER_REQ and TOKENS_PER_REQ[m]) else 0.0
         out.append({
             "model": m,
-            "source": src,
-            "key": f"{m}|{src}",
+            "source": out_srcs[0] if len(out_srcs) == 1 else "/".join(out_srcs),
+            "key": f"{m}|{grp}",
             "is_free": is_free,
             "group": group,
             "name": name,
@@ -345,7 +449,14 @@ def model_stats(rows, now_ms, cost_map=None):
             "cost_total": s["cost_total"],
             "tokens_in": s["tokens_in"], "tokens_out": s["tokens_out"],
             "tokens_cache": s["tokens_cache"],
-            "req_lim": REQ_LIMITS.get(m),
+            "tokens_in_s": s["tokens_in_s"], "tokens_out_s": s["tokens_out_s"], "tokens_cache_s": s["tokens_cache_s"],
+            "tokens_in_w": s["tokens_in_w"], "tokens_out_w": s["tokens_out_w"], "tokens_cache_w": s["tokens_cache_w"],
+            "tokens_in_m": s["tokens_in_m"], "tokens_out_m": s["tokens_out_m"], "tokens_cache_m": s["tokens_cache_m"],
+            "tq_s": s.get("tq_s", 0.0), "tq_w": s.get("tq_w", 0.0), "tq_m": s.get("tq_m", 0.0),
+            "tp_s": s.get("tp_s", 0.0), "tp_w": s.get("tp_w", 0.0), "tp_m": s.get("tp_m", 0.0),
+            "req_lim": req_lim,
+            "est_req_cost": est_req_cost,
+            "est_tok_cost": est_tok_cost,
         })
     out.sort(key=lambda x: -x["count_s"])
     return out
@@ -355,13 +466,19 @@ def model_history(rows, days=14):
     buckets = {}
     now_ms = int(time.time() * 1000)
     start = now_ms - days * 86400 * 1000
+    cost_by_model = {}
+    for r in rows:
+        if r["ts"] < start:
+            continue
+        if r.get("cost"):
+            cost_by_model[r["model"]] = cost_by_model.get(r["model"], 0.0) + r["cost"]
     for r in rows:
         if r["ts"] < start:
             continue
         d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%m-%d")
         m = r["model"]
         src = r.get("src") or "?"
-        free = is_free_model(m)
+        free = is_free_model(m) or (cost_by_model.get(m, 0.0) <= 0)
         key = (m, src) if free else (m, "go")
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
         b[0] += r["cost"] if r["cost"] is not None else 0.0
@@ -561,7 +678,8 @@ class Api:
 
     def _collect_rows(self):
         """收集行数据。服务器数据可用时: go 组以服务器 usage_records 为权威 (含 VS Code/Codex/所有 agent),
-        本地 opencode.db 仅补充 kilo (服务器无)。服务器不可用时回退本地 + codex 日志。"""
+        本地 opencode.db 补充服务器没有的模型 (如 hy3 等通过 opencode/zen 使用的免费模型), 避免覆盖服务器已有模型造成重复计数。
+        服务器不可用时回退本地 + codex 日志。"""
         srv_rows = []
         try:
             import server_data as sd
@@ -575,8 +693,10 @@ class Api:
                 cost_map = sd.read_cost_map()
             except Exception:
                 pass
-            kilo_rows = read_opencode_all(srcs={"kilo"})
-            return srv_rows + kilo_rows, cost_map
+            srv_models = {r["model"] for r in srv_rows}
+            local_rows = read_opencode_all()
+            extra = [r for r in local_rows if r["model"] not in srv_models]
+            return srv_rows + extra, cost_map
 
         go_rows = read_opencode_all()
         cx_rows, new_id = read_codex_logs(self.last_log_id)
