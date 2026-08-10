@@ -111,6 +111,18 @@
   .m-item .rem { color: var(--cyan); font-size: 9px; margin-left: 5px; }
   .m-item .sub { color: var(--faded); font-size: 9px; margin-left: 5px; }
 
+  /* ---- small (最小化) ---- */
+  .small { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 6px; }
+  .small.on { display: flex; }
+  .s-top { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .s-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .s-sup { font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-model { font-size: 11px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-hint { font-size: 9px; color: var(--faded); letter-spacing: 0.5px; }
+  .s-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 10px; color: var(--dim); flex-shrink: 0; }
+  .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; }
+  .s-grid .sg b { color: var(--text); font-weight: 700; }
+
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .dash.on { display: flex; }
@@ -129,7 +141,8 @@
   .d-left { flex: 1 1 46%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; overflow: hidden; }
   .d-left .m-head { padding: 0 0 5px; flex-shrink: 0; }
   .d-left .m-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-  .d-right { flex: 1 1 54%; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+  .d-right { flex: 1 1 54%; display: flex; flex-direction: column; min-height: 0; gap: 8px; min-width: 0; }
+  .d-heat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; flex-shrink: 0; }
   .d-chart { flex: 1 1 70%; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .chart-title { font-size: 11px; color: var(--text); font-weight: 600; text-align: center; flex-shrink: 0; }
   .chart-note { font-size: 9px; color: var(--faded); text-align: center; flex-shrink: 0; }
@@ -188,6 +201,34 @@
   </header>
 
   <div class="main">
+    <!-- small (最小化: 圆环 + 供应商/模型 + 迷你统计) -->
+    <div class="small" id="smallView">
+      <div class="s-top">
+        <div class="ringbox" style="width:150px;height:120px">
+          <svg viewBox="0 0 118 118">
+            <circle class="ring ring-track" cx="59" cy="59" r="28"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="41"/>
+            <circle class="ring ring-track" cx="59" cy="59" r="52"/>
+            <circle class="ring ring-badge" cx="59" cy="59" r="18"/>
+            <circle class="ring r0" id="ring0" cx="59" cy="59" r="28"/>
+            <circle class="ring r1" id="ring1" cx="59" cy="59" r="41"/>
+            <circle class="ring r2" id="ring2" cx="59" cy="59" r="52"/>
+          </svg>
+          <div class="rc">
+            <span class="label" id="sLabel">总用量</span>
+            <span class="amount" id="sAmount">—</span>
+          </div>
+          <div class="ring-sub" id="sSub"></div>
+        </div>
+        <div class="s-info">
+          <div class="s-sup" id="sSupplier">OpenCode Go</div>
+          <div class="s-model" id="sModel">—</div>
+          <div class="s-hint" id="sHint">←→ 供应商 · ↑↓ 模型</div>
+        </div>
+      </div>
+      <div class="s-grid" id="sGrid"></div>
+    </div>
+
     <!-- compact -->
     <div class="compact" id="compactView">
       <div class="c-top">
@@ -251,6 +292,7 @@
           <div class="m-list" id="dList"></div>
         </div>
         <div class="d-right">
+          <div class="d-heat" id="dHeatmap"></div>
           <div class="d-chart">
             <div class="chart-title" id="dChartTitle">点击左侧模型查看曲线</div>
             <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
@@ -325,12 +367,16 @@ const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]]
 const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
 const RING_KEYS = ["session", "weekly", "monthly"];
 const RING_R = [28, 41, 52];
-const COMPACT_H = 480, EXPAND_H = 640;
+const COMPACT_H = 480, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 170;
 
-let state = { windows: [], stats: [], history: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
+const SUPPLIER_ORDER = ["go", "zen", "kilo", "router"];
+const SUPPLIER_NAMES = { go: "OpenCode Go", zen: "OpenCode Zen", kilo: "Kilo", router: "OpenRouter" };
+
+let state = { windows: [], stats: [], history: [], suppliers: {}, heatmap: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
 let lastCal = null;
-let expanded = false;
+let uiState = "mid";   // small | mid | large
 let selModel = null;
+let selSupplier = null; // null = 全部
 let mFilter = "all";
 let mUnit = "count";
 
@@ -407,6 +453,8 @@ function render() {
   fitAmount();
   setRing(0, s.pct); setRing(1, w.pct); setRing(2, m.pct);
   renderSide(); renderTabs(); renderModels(); renderLimits(); renderChart(); renderStats();
+  renderSmall();
+  renderLarge();
   const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
   const total = (s.used || 0) + (w.used || 0) + (m.used || 0);
   $("#footLeft").textContent = `累计 ${total ? money(total) : "—"} · ${state.rows} 条 · ${ago}s前`;
@@ -446,8 +494,10 @@ function renderTabs() {
 }
 
 function filteredStats() {
-  if (mFilter === "all") return state.stats;
-  return state.stats.filter(x => x.group === mFilter);
+  let st = state.stats;
+  if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
+  if (selSupplier && uiState !== "mid") st = st.filter(x => (x.source || "").includes(selSupplier));
+  return st;
 }
 
 function fillModelList(el, key) {
@@ -560,7 +610,9 @@ function renderChart() {
   const svg = $("#dChartSvg");
   const note = $("#chartNote");
   if (!selModel) { svg.innerHTML = ""; $("#dChartTitle").textContent = "点击左侧模型查看曲线"; if (note) note.textContent = "近 14 天费用(USD)"; return; }
-  const item = state.history.find(h => (h.key || h.model) === selModel);
+  const selKey = String(selModel);
+  const item = state.history.find(h => (h.key || h.model) === selKey) ||
+               state.history.find(h => selKey.startsWith((h.model || "") + "|"));
   if (!item || !item.series.length) { svg.innerHTML = ""; $("#dChartTitle").textContent = "暂无历史数据"; return; }
   const isFree = !!item.is_free;
   if (note) note.textContent = isFree ? "近 14 天 Token(含缓存)" : "近 14 天费用(USD)";
@@ -619,11 +671,83 @@ function renderStats() {
   ds.appendChild(tokDiv);
 }
 
+function activeSuppliers() {
+  const list = SUPPLIER_ORDER.filter(s => state.suppliers[s] && state.suppliers[s].count > 0);
+  return list.length ? list : SUPPLIER_ORDER.slice(0, 1);
+}
+function supAgg(src) {
+  return state.suppliers[src] || { tokens: 0, cost: 0, input: 0, output: 0, cache: 0, count: 0, days: 0 };
+}
+function allAgg() {
+  return state.suppliers.all || { tokens: 0, cost: 0, input: 0, output: 0, cache: 0, count: 0, days: 0 };
+}
+
+function renderSmall() {
+  const grid = $("#sGrid");
+  if (!grid) return;
+  const list = activeSuppliers();
+  if (!selSupplier || !list.includes(selSupplier)) selSupplier = list[0];
+  const agg = supAgg(selSupplier);
+  const all = allAgg();
+  const cur = win(state.mode === "overview" ? "session" : state.mode) || { pct: 0 };
+  $("#sLabel").textContent = state.mode === "overview" ? "总用量" : periodName(state.mode);
+  $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
+  $("#sSub").textContent = state.suppliers[selSupplier] ? money(agg.cost) + " · " + agg.count + "次" : "";
+  $("#sSupplier").textContent = SUPPLIER_NAMES[selSupplier] || selSupplier;
+  // 模型: 当前供应商下用量最多的模型
+  const srcStats = state.stats.filter(x => x.source === selSupplier || (x.source || "").includes(selSupplier));
+  const sortedM = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0));
+  const topM = sortedM[0];
+  $("#sModel").textContent = topM ? `${topM.name} · ${fmtTokens(topM.count_total || 0)} 次` : "—";
+  const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
+  const rows = [
+    ["总Token", fmtTokens(agg.tokens), "总费用", money(agg.cost)],
+    ["输入", fmtTokens(agg.input), "请求", (agg.count || 0) + " 次"],
+    ["输出", fmtTokens(agg.output), "活跃天数", (agg.days || 0) + " 天"],
+    ["缓存", fmtTokens(agg.cache), "占比", pct.toFixed(1) + "%"],
+  ];
+  grid.innerHTML = rows.map(([a, b, c, d]) =>
+    `<div class="sg"><span>${a} <b>${b}</b></span><span>${c} <b>${d}</b></span></div>`).join("");
+}
+
+function heatColor(v, max) {
+  if (max <= 0 || v <= 0) return "rgba(148,163,184,0.08)";
+  const t = Math.pow(v / max, 0.5);
+  return `rgba(99,102,241,${0.15 + 0.85 * t})`;
+}
+
+function renderLarge() {
+  const box = $("#dHeatmap");
+  if (!box) return;
+  const list = activeSuppliers();
+  const src = selSupplier && list.includes(selSupplier) ? selSupplier : list[0];
+  const srcName = SUPPLIER_NAMES[src] || src;
+  // 热力图数据: 取该供应商按天 (全量), 最近 30 天为主, 少于 30 天则全量
+  const rows = state.heatmap.filter(x => x.src === src);
+  const byDate = {};
+  rows.forEach(x => { byDate[x.date] = { count: x.count, tokens: x.tokens, cost: x.cost }; });
+  const dates = Object.keys(byDate).sort().slice(-30);
+  const maxV = Math.max(1, ...dates.map(d => byDate[d].tokens || 0));
+  let html = `<div style="font-size:11px;color:var(--text);font-weight:700;margin-bottom:4px">${srcName} · 热力图 (近 ${dates.length} 天)</div>`;
+  html += `<div style="display:flex;flex-wrap:wrap;gap:3px">`;
+  dates.forEach(d => {
+    const v = byDate[d];
+    html += `<div title="${d} · ${v.count}次 · ${fmtTokens(v.tokens)} tok" style="width:14px;height:14px;border-radius:3px;background:${heatColor(v.tokens, maxV)}"></div>`;
+  });
+  html += `</div>`;
+  html += `<div style="display:flex;gap:6px;margin-top:4px;font-size:8.5px;color:var(--faded)">`;
+  html += `共 ${dates.length} 天 · ${fmtTokens((supAgg(src).tokens))} tok · $${supAgg(src).cost.toFixed(2)}`;
+  html += `</div>`;
+  box.innerHTML = html;
+}
+
 async function refresh() {
   try {
     if (!window.pywebview || !window.pywebview.api) { setTimeout(refresh, 500); return; }
     const data = await window.pywebview.api.get_snapshot();
     state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
+    state.suppliers = data.suppliers || {};
+    state.heatmap = data.heatmap || [];
     state.rows = data.rows; state.lastRefresh = Date.now();
     lastCal = data.calibration;
     state.server = data.server || null;
@@ -635,14 +759,20 @@ async function refresh() {
   }
 }
 
-function setExpanded(v) {
-  expanded = v;
-  $("#btnExpand").classList.toggle("on", v);
-  $("#btnExpand").textContent = v ? "▣" : "□";
-  $("#compactView").style.display = v ? "none" : "flex";
-  $("#dashView").classList.toggle("on", v);
-  window.pywebview.api.resize_window(560, v ? EXPAND_H : COMPACT_H);
-  window.pywebview.api.save_expanded(v);
+function setUiState(v) {
+  uiState = v;
+  const onLarge = v === "large";
+  $("#btnExpand").classList.toggle("on", onLarge);
+  $("#btnExpand").textContent = onLarge ? "▣" : "□";
+  $("#smallView").classList.toggle("on", v === "small");
+  $("#compactView").style.display = v === "mid" ? "flex" : "none";
+  $("#dashView").classList.toggle("on", onLarge);
+  if (v === "small") {
+    window.pywebview.api.resize_window(SMALL_W, SMALL_H);
+  } else {
+    window.pywebview.api.resize_window(560, onLarge ? EXPAND_H : COMPACT_H);
+  }
+  try { window.pywebview.api.save_ui_state(v); } catch (_) {}
   setTimeout(() => render(), 250);
 }
 
@@ -686,8 +816,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 async function initExpanded() {
   try {
-    const v = await window.pywebview.api.get_expanded();
-    if (v === true) setExpanded(true);
+    const v = await window.pywebview.api.get_ui_state();
+    if (v === "small") setUiState("small");
+    else if (v === "large") setUiState("large");
   } catch (_) {}
 }
 
@@ -720,9 +851,38 @@ async function doGrab() {
   }
 }
 
-$("#btnMin").onclick = () => setExpanded(false);
-$("#btnExpand").onclick = () => setExpanded(!expanded);
+$("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small");
+$("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large");
 $("#btnClose").onclick = () => window.pywebview.api.quit();
+
+// 键盘导航: ←→ 切供应商, ↑↓ 切模型 (小窗/大窗生效)
+function cycleSupplier(dir) {
+  const list = activeSuppliers();
+  if (!list.length) return;
+  if (!selSupplier || !list.includes(selSupplier)) selSupplier = list[0];
+  const i = list.indexOf(selSupplier);
+  selSupplier = list[(i + dir + list.length) % list.length];
+  render();
+}
+function cycleModel(dir) {
+  const key = "count_total";
+  const list = state.stats
+    .filter(x => !selSupplier || (x.source || "").includes(selSupplier))
+    .sort((a, b) => (b[key] || 0) - (a[key] || 0))
+    .map(x => x.key);
+  if (!list.length) return;
+  if (!selModel || !list.includes(selModel)) selModel = list[0];
+  const i = list.indexOf(selModel);
+  selModel = list[(i + dir + list.length) % list.length];
+  render();
+}
+document.addEventListener("keydown", (e) => {
+  if (uiState === "mid") return;
+  if (e.key === "ArrowLeft") { cycleSupplier(-1); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { cycleSupplier(1); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { cycleModel(-1); e.preventDefault(); }
+  else if (e.key === "ArrowDown") { cycleModel(1); e.preventDefault(); }
+});
 
 function saveViewPrefs() {
   try { localStorage.setItem("mFilter", mFilter); localStorage.setItem("mUnit", mUnit); } catch (_) {}

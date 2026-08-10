@@ -187,6 +187,10 @@ def scan_free_models(cfg=None, force=False):
     return models
 PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
                 "tencent-tokenhub": "zen", "openrouter": "router"}
+# 供应商显示名 (src -> 名称), 小窗/大窗供应商切换用
+SUPPLIER_NAMES = {"go": "OpenCode Go", "zen": "OpenCode Zen",
+                  "kilo": "Kilo", "router": "OpenRouter"}
+SUPPLIER_ORDER = ["go", "zen", "kilo", "router"]
 # 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
 PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai",
                      "opencode", "openkilo", "openrouter", "poolside", "stepfun", "openai"}
@@ -618,6 +622,62 @@ def model_history(rows, days=14):
     return out
 
 
+def supplier_stats(rows):
+    """按供应商聚合全量统计 (小窗 + 大窗汇总)。
+    返回 {src: {tokens, cost, input, output, cache, count, days}}, 含 "all" 合计。"""
+    agg = {}
+    for r in rows:
+        src = r.get("src") or "?"
+        tk = r.get("tokens") or {}
+        ti = tk.get("input", 0) or 0
+        to = tk.get("output", 0) or 0
+        cache = tk.get("cache") or {}
+        tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
+        cost = r.get("cost") or 0.0
+        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+        for key in (src, "all"):
+            s = agg.setdefault(key, {"tokens": 0, "cost": 0.0, "input": 0, "output": 0,
+                                     "cache": 0, "count": 0, "days": set()})
+            s["tokens"] += ti + to + tc
+            s["cost"] += cost
+            s["input"] += ti
+            s["output"] += to
+            s["cache"] += tc
+            s["count"] += 1
+            s["days"].add(d)
+    out = {}
+    for key, s in agg.items():
+        d = dict(s)
+        d["days"] = len(s["days"])
+        out[key] = d
+    return out
+
+
+def heatmap(rows, days=None):
+    """按天聚合热力图数据: 每供应商每天的 cost/count/tokens。
+    days=None 表示全量; 返回 [{date, src, cost, count, tokens}], 按 date+src 排序。"""
+    now_ms = int(time.time() * 1000)
+    start = None if days is None else now_ms - days * 86400 * 1000
+    buckets = {}
+    for r in rows:
+        if start is not None and r["ts"] < start:
+            continue
+        src = r.get("src") or "?"
+        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+        tk = r.get("tokens") or {}
+        ti = tk.get("input", 0) or 0
+        to = tk.get("output", 0) or 0
+        cache = tk.get("cache") or {}
+        tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
+        b = buckets.setdefault((d, src), [0.0, 0, 0])
+        b[0] += r.get("cost") or 0.0
+        b[1] += 1
+        b[2] += ti + to + tc
+    out = [{"date": d, "src": s, "cost": round(c, 4), "count": n, "tokens": t}
+           for (d, s), (c, n, t) in sorted(buckets.items())]
+    return out
+
+
 def _snapshot_cookie_db(cookie_db):
     try:
         import shutil
@@ -759,6 +819,8 @@ class Api:
         self.windows = []
         self.stats = []
         self.history = []
+        self.suppliers = {}
+        self.heatmap = []
         self.last_log_id = self.cfg.get("codex_log_id", 0)
         self.last_refresh = 0
         self.lock = threading.Lock()
@@ -782,6 +844,8 @@ class Api:
             self._apply_calibration(self.windows, now_ms)
             self.stats = model_stats(self.rows, now_ms, cost_map)
             self.history = model_history(self.rows)
+            self.suppliers = supplier_stats(self.rows)
+            self.heatmap = heatmap(self.rows)
             self.last_refresh = now_ms
         self._try_server_sync()
 
@@ -891,6 +955,8 @@ class Api:
             "windows": self.windows,
             "stats": self.stats,
             "history": self.history,
+            "suppliers": self.suppliers,
+            "heatmap": self.heatmap,
             "rows": len(self.rows),
             "key": self.key_ok,
             "models": self.models,
@@ -944,6 +1010,15 @@ class Api:
         return True
 
     def apply_opacity(self):
+        return True
+
+    def get_ui_state(self):
+        return self.cfg.get("ui_state", "mid")
+
+    def save_ui_state(self, s):
+        if s in ("small", "mid", "large"):
+            self.cfg["ui_state"] = s
+            save_config(self.cfg)
         return True
 
     def open_console(self):
