@@ -1024,9 +1024,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 async function initExpanded() {
   try {
-    const v = localStorage.getItem("uiState") || "mid";
-    if (v === "small") setUiState("small");
-    else if (v === "large") setUiState("large");
+    setUiState("mid");
   } catch (_) {}
 }
 
@@ -1191,18 +1189,8 @@ $("#srvClear").onclick = async () => {
   $("#" + id).addEventListener("click", (e) => { if (e.target === $("#" + id)) $("#" + id).classList.remove("show"); });
 });
 
-let dragging = false, ox = 0, oy = 0;
-document.querySelector("header").addEventListener("mousedown", (e) => {
-  if (e.target.closest(".wb")) return;
-  dragging = true; ox = e.screenX; oy = e.screenY;
-});
-document.addEventListener("mousemove", (e) => {
-  if (!dragging) return;
-  
-  ox = e.screenX; oy = e.screenY;
-});
-document.addEventListener("mouseup", () => { dragging = false; });
 
+window.widgetAPI.onSnapSmall(() => { if (uiState !== "small") setUiState("small"); });
 initOpacity();
 syncScale();
 loadViewPrefs();

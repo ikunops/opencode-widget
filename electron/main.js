@@ -11,11 +11,15 @@ const SIZES = {
 };
 
 let win = null;
+let snapped = false;
 
 function createWindow() {
+  const wa = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({
     width: SIZES.mid[0],
     height: SIZES.mid[1],
+    x: Math.round((wa.width - SIZES.mid[0]) / 2),
+    y: Math.round((wa.height - SIZES.mid[1]) / 2),
     frame: false,
     transparent: true,
     resizable: true,
@@ -34,6 +38,30 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'app', 'index.html'));
 
+  // 吸顶：窗口顶边靠近屏幕工作区顶部时贴齐并通知前端切小屏
+  const born = Date.now();
+  win.on('move', () => {
+    if (Date.now() - born < 2000) return;  // 启动 2 秒内不吸顶，避免初始化跳动触发
+    try {
+      const [x, y] = win.getPosition();
+      const wa2 = screen.getDisplayNearestPoint({ x, y }).workArea;
+      const near = Math.abs(y - wa2.y) <= 12;
+      if (near) {
+        if (y !== wa2.y) win.setPosition(x, wa2.y);
+        if (!snapped) {
+          snapped = true;
+          // 主进程直接改小屏尺寸（不依赖前端 IPC，确保吸顶即小屏）
+          const size = SIZES.small;
+          const b = win.getBounds();
+          win.setBounds({ x: b.x, y: wa2.y, width: size[0], height: size[1] });
+          win.webContents.send('snap-small');
+        }
+      } else {
+        snapped = false;
+      }
+    } catch (_) { /* ignore */ }
+  });
+
   win.on('closed', () => { win = null; });
 }
 
@@ -51,15 +79,34 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('resize', (e, uiState) => {
   const size = SIZES[uiState] || SIZES.mid;
-  if (win) {
-    const bounds = win.getBounds();
-    win.setBounds({
-      x: bounds.x + Math.floor((bounds.width - size[0]) / 2),
-      y: bounds.y + Math.floor((bounds.height - size[1]) / 2),
-      width: size[0],
-      height: size[1],
-    });
-  }
+  if (!win) return true;
+  const bounds = win.getBounds();
+  const wa = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
+  let nx = bounds.x + Math.floor((bounds.width - size[0]) / 2);
+  let ny = bounds.y + Math.floor((bounds.height - size[1]) / 2);
+  // 吸顶保持：窗口顶边原本贴在工作区顶部时，缩放后仍贴顶（避免掉下来）
+  if (Math.abs(bounds.y - wa.y) <= 12) ny = wa.y;
+  win.setBounds({ x: nx, y: ny, width: size[0], height: size[1] });
+  return true;
+});
+
+ipcMain.handle('get-pos', () => {
+  if (!win) return { x: 0, y: 0 };
+  const [x, y] = win.getPosition();
+  return { x, y };
+});
+
+ipcMain.handle('move-to', (e, x, y) => {
+  if (!win) return true;
+  const px = Math.round(x);
+  const py = Math.round(y);
+  const d = screen.getDisplayNearestPoint({ x: px, y: py });
+  const wa = d.workArea;
+  const SNAP = 12;
+  let ny = py;
+  // 吸顶：窗口顶边靠近屏幕工作区顶部时贴齐
+  if (Math.abs(py - wa.y) <= SNAP) ny = wa.y;
+  win.setPosition(px, ny);
   return true;
 });
 
