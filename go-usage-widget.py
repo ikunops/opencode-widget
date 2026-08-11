@@ -1181,7 +1181,8 @@ def _set_layered(hwnd):
 
 def _rebuild_layered_hit_test(win):
     """resize 后 WebView2 的合成表面（alpha 命中区域）不会跟随新尺寸，
-    导致新区域点击穿透。同步翻转 WS_EX_LAYERED 强制系统重建分层表面。"""
+    导致新区域点击穿透。同步翻转 WS_EX_LAYERED 强制系统重建分层表面。
+    toggle 会清掉 COLORKEY 透明属性, 需要重设 (否则页面透明区变键色实色块)。"""
     try:
         native = getattr(win, "native", None)
         if native is None or not getattr(native, "Handle", None):
@@ -1194,6 +1195,8 @@ def _rebuild_layered_hit_test(win):
         if ex & WS_EX_LAYERED:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
+        # 重设 COLORKEY: 窗体键色 (1,2,3) 透明化, 页面透明区域真穿透
+        user32.SetLayeredWindowAttributes(hwnd, 0x030201, 0, 0x1)
     except Exception:
         pass
 
@@ -1206,6 +1209,11 @@ def _enable_layered_watcher():
                 hwnd = user32.FindWindowW(None, title)
                 if hwnd:
                     _set_layered(hwnd)
+                    # 保活 COLORKEY 透明 (键色 1,2,3 透明化)
+                    try:
+                        user32.SetLayeredWindowAttributes(hwnd, 0x030201, 0, 0x1)
+                    except Exception:
+                        pass
             time.sleep(1.0)
 
     threading.Thread(target=run, daemon=True).start()
