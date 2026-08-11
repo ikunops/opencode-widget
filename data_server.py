@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Data-only server for the Go usage widget.
+
+Python 只负责取数/计算，前端与窗口交互交给 Electron (electron/main.js)。
+Serves JSON on http://127.0.0.1:8765/api/*
+"""
+import json
+import os
+import sys
+import threading
+import time
+import importlib.util
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, APP_DIR)
+
+_spec = importlib.util.spec_from_file_location("gw", os.path.join(APP_DIR, "go-usage-widget.py"))
+gw = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(gw)
+
+try:
+    import server_data as sd
+except Exception:
+    sd = None
+
+PORT = 8765
+CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
+
+
+def build_state():
+    now_ms = int(time.time() * 1000)
+    try:
+        rows, _ = _collect_rows()
+    except Exception:
+        rows = []
+    try:
+        key = _effective_key()
+        key_ok = bool(key)
+        models = 0
+        all_go_models = []
+        if key:
+            all_go_models = gw.fetch_go_model_list(key)
+            models = len(all_go_models)
+    except Exception:
+        key_ok = False
+        models = 0
+        all_go_models = []
+
+    windows = gw.build_windows(rows, now_ms)
+    _apply_calibration(windows)
+    stats = gw.model_stats(rows, now_ms, None, all_go_models)
+    history = gw.model_history(rows, days=90)
+    suppliers = gw.supplier_stats(rows)
+    heatmap = gw.heatmap(rows)
+
+    cfg = {}
+    try:
+        cfg = gw.load_config()
+    except Exception:
+        pass
+    cal = {k: v for k, v in (cfg.get("calibration") or {}).items() if v}
+    srv_cfg = cfg.get("server") or {}
+
+    return {
+        "windows": windows,
+        "stats": stats,
+        "history": history,
+        "suppliers": suppliers,
+        "heatmap": heatmap,
+        "rows": len(rows),
+        "key": key_ok,
+        "models": models,
+        "calibration": cal if cal else None,
+        "server": None,
+        "server_error": None,
+        "server_configured": bool(srv_cfg.get("auth_cookie")),
+        "ts": now_ms,
+    }
+
+
+def _effective_key():
+    try:
+        cfg = gw.load_config()
+        k = (cfg.get("api_key") or "").strip()
+        if k:
+            return k
+    except Exception:
+        pass
+    return gw.discover_go_key() or ""
+
+
+def _apply_calibration(windows):
+    try:
+        cfg = gw.load_config()
+        cal = cfg.get("calibration") or {}
+    except Exception:
+        return
+    for w, key in zip(windows, ["session", "weekly", "monthly"]):
+        pct = cal.get(key)
+        if not pct or pct <= 0:
+            continue
+        limit = gw.LIMITS.get(key)
+        if not limit:
+            continue
+        target = limit * pct / 100.0
+        if target > w["used"]:
+            w["used"] = target
+            w["pct"] = min(100.0, target / limit * 100)
+
+
+def _collect_rows():
+    srv_rows = []
+    if sd is not None:
+        try:
+            srv_rows = sd.read_server_rows()
+        except Exception:
+            srv_rows = []
+    if srv_rows:
+        cost_map = {}
+        if sd is not None:
+            try:
+                cost_map = sd.read_cost_map()
+            except Exception:
+                pass
+        srv_models = {r["model"] for r in srv_rows}
+        local_rows = gw.read_opencode_all()
+        extra = [r for r in local_rows if r["model"] not in srv_models]
+        return srv_rows + extra, cost_map
+    go_rows = gw.read_opencode_all()
+    cx_rows, _ = gw.read_codex_logs(0)
+    return go_rows + cx_rows, {}
+
+
+def do_sync():
+    try:
+        cfg = gw.load_config()
+    except Exception:
+        cfg = {}
+    srv = cfg.get("server") or {}
+    cookie = srv.get("auth_cookie") or ""
+    ws = srv.get("workspace_id") or ""
+    if not cookie or not ws:
+        return {"ok": False, "error": "缺少 auth cookie 或 workspace ID"}
+    try:
+        res = gw.scrape_server_usage(cookie, ws)
+    except Exception as e:
+        return {"ok": False, "error": f"抓取失败: {e}"}
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error", "抓取失败")}
+    if sd is not None:
+        try:
+            sd.sync_all(cookie, ws, windows=res.get("windows"), max_pages=130)
+        except Exception as e:
+            return {"ok": False, "error": f"落库失败: {e}"}
+    with CACHE["lock"]:
+        CACHE["state"] = None
+        CACHE["ts"] = 0
+    return {"ok": True, "windows": res.get("windows")}
+
+
+def _config_json():
+    try:
+        cfg = gw.load_config()
+    except Exception:
+        cfg = {}
+    return {
+        "api_key": cfg.get("api_key") or "",
+        "server": cfg.get("server") or {"auth_cookie": "", "workspace_id": ""},
+        "calibration": cfg.get("calibration") or {},
+    }
+
+
+def _send_json(self, obj, code=200):
+    body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    self.send_response(code)
+    self.send_header("Content-Type", "application/json; charset=utf-8")
+    self.send_header("Access-Control-Allow-Origin", "*")
+    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+    self.wfile.write(body)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def _read_body(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            length = 0
+        raw = self.rfile.read(length) if length else b""
+        try:
+            return json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            return {}
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/api/state":
+            now = time.time()
+            with CACHE["lock"]:
+                if CACHE["state"] is None or now - CACHE["ts"] > 30:
+                    try:
+                        CACHE["state"] = build_state()
+                        CACHE["ts"] = now
+                    except Exception as e:
+                        CACHE["state"] = {"error": str(e)}
+                        CACHE["ts"] = now
+                body = json.dumps(CACHE["state"], ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/api/config":
+            _send_json(self, _config_json())
+        elif path == "/api/health":
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            _send_json(self, {"ok": False, "error": "not found"}, 404)
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        data = self._read_body()
+        try:
+            cfg = gw.load_config()
+        except Exception:
+            cfg = {}
+        if path == "/api/key":
+            cfg["api_key"] = (data.get("key") or "").strip()
+            gw.save_config(cfg)
+            _send_json(self, {"ok": True})
+        elif path == "/api/server":
+            cfg["server"] = {
+                "auth_cookie": (data.get("auth_cookie") or "").strip(),
+                "workspace_id": (data.get("workspace_id") or "").strip(),
+            }
+            gw.save_config(cfg)
+            _send_json(self, {"ok": True})
+        elif path == "/api/calibrate":
+            cal = {}
+            for k in ("session", "weekly", "monthly"):
+                v = data.get(k)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if fv > 0:
+                            cal[k] = min(100.0, fv)
+                    except Exception:
+                        pass
+            cfg["calibration"] = cal
+            gw.save_config(cfg)
+            _send_json(self, {"ok": True})
+        elif path == "/api/sync":
+            _send_json(self, do_sync())
+        else:
+            _send_json(self, {"ok": False, "error": "not found"}, 404)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+
+def main():
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    print(f"[data-server] listening on http://127.0.0.1:{PORT}/api/state")
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

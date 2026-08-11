@@ -8,3 +8,6 @@ config.json
 
 # 第三方依赖库（本地打包的 pywebview/pythonnet 等，不纳入版本控制）
 pylib/
+
+# Electron 依赖（大体积二进制，不纳入版本控制）
+electron/node_modules/

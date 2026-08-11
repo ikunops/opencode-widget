@@ -255,6 +255,19 @@ def discover_go_key():
         return None
 
 
+def fetch_go_model_list(api_key):
+    try:
+        req = Request(GO_ENDPOINT, headers={
+            "Authorization": "Bearer " + (api_key or ""),
+            "User-Agent": DASH_USER_AGENT,
+        })
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+    except Exception:
+        return []
+
+
 def est_cost(model, tokens):
     p = PRICES.get(model)
     if not p:
@@ -422,10 +435,10 @@ def build_windows(rows, now_ms):
     ]
 
 
-def model_stats(rows, now_ms, cost_map=None):
+def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
     cost_map = cost_map or {}
     stats = {}
-    rows = sorted(rows, key=lambda r: r.get("ts") or 0)  # session 聚类依赖时间有序
+    rows = sorted(rows, key=lambda r: r.get("ts") or 0)
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
     paid_rows = [r for r in rows if r.get("cost")]
@@ -609,6 +622,37 @@ def model_stats(rows, now_ms, cost_map=None):
     for x in out:
         if x["group"] == "free" and "used" not in x:
             x["used"] = True
+
+    existing_keys = {x["key"] for x in out}
+    if all_go_models:
+        for mid in all_go_models:
+            nm = norm_model(mid)
+            gkey = f"{nm}|go"
+            if gkey in existing_keys:
+                continue
+            p = PRICES.get(nm) or {}
+            req_lim = REQ_LIMITS.get(nm)
+            est_req_cost = (60.0 / req_lim[2]) if req_lim and req_lim[2] else 0.0
+            est_tok_cost = (est_req_cost / TOKENS_PER_REQ[nm]) if (nm in TOKENS_PER_REQ and TOKENS_PER_REQ[nm]) else 0.0
+            out.append({
+                "model": nm, "source": "go", "key": gkey,
+                "is_free": False, "group": "go",
+                "name": DISPLAY_NAMES.get(nm, nm),
+                "used": False,
+                "count_s": 0, "count_w": 0, "count_m": 0, "count_total": 0,
+                "cost_s": 0.0, "cost_w": 0.0, "cost_m": 0.0, "cost_total": 0.0,
+                "tokens_in": 0, "tokens_out": 0, "tokens_cache": 0,
+                "tokens_in_s": 0, "tokens_out_s": 0, "tokens_cache_s": 0,
+                "tokens_in_w": 0, "tokens_out_w": 0, "tokens_cache_w": 0,
+                "tokens_in_m": 0, "tokens_out_m": 0, "tokens_cache_m": 0,
+                "tq_s": 0.0, "tq_w": 0.0, "tq_m": 0.0,
+                "tp_s": 0.0, "tp_w": 0.0, "tp_m": 0.0,
+                "req_lim": req_lim, "est_req_cost": est_req_cost, "est_tok_cost": est_tok_cost,
+                "sessions": 0, "prompts": 0,
+                "days": 0, "rate": 0.0,
+                "cache_read": 0, "cache_write": 0, "cache_hit": 0.0,
+            })
+
     out.sort(key=lambda x: -x["count_s"])
     return out
 
@@ -622,12 +666,13 @@ def model_history(rows, days=14):
         if r["ts"] < start:
             continue
         if r.get("cost"):
-            cost_by_model[r["model"]] = cost_by_model.get(r["model"], 0.0) + r["cost"]
+            nm = norm_model(r["model"])
+            cost_by_model[nm] = cost_by_model.get(nm, 0.0) + r["cost"]
     for r in rows:
         if r["ts"] < start:
             continue
         d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%m-%d")
-        m = r["model"]
+        m = norm_model(r["model"])
         src = r.get("src") or "?"
         free = is_free_model(m) or (cost_by_model.get(m, 0.0) <= 0)
         key = (m, src) if free else (m, "go")
@@ -881,11 +926,18 @@ class Api:
     def refresh_data(self):
         now_ms = int(time.time() * 1000)
         rows, cost_map = self._collect_rows()
+        all_go_models = []
+        try:
+            gk = self.api_key or discover_go_key()
+            if gk:
+                all_go_models = fetch_go_model_list(gk)
+        except Exception:
+            pass
         with self.lock:
             self.rows = rows
             self.windows = build_windows(self.rows, now_ms)
             self._apply_calibration(self.windows, now_ms)
-            self.stats = model_stats(self.rows, now_ms, cost_map)
+            self.stats = model_stats(self.rows, now_ms, cost_map, all_go_models)
             self.history = model_history(self.rows, days=90)
             self.suppliers = supplier_stats(self.rows)
             self.heatmap = heatmap(self.rows)
@@ -923,6 +975,22 @@ class Api:
         return go_rows + cx_rows, {}
 
     def _apply_calibration(self, windows, now_ms):
+        srv = self.server_usage or {}
+        if srv.get("ok") and srv.get("windows"):
+            srv_map = {w["kind"]: w for w in srv["windows"]}
+            for w in windows:
+                sw = srv_map.get(w["kind"])
+                if not sw:
+                    continue
+                pct = sw.get("pct", w["pct"])
+                w["used"] = LIMITS[w["kind"]] * pct / 100.0
+                w["pct"] = pct
+                w["calibrated"] = True
+            return
+
+        if not srv.get("ok"):
+            return
+
         cal = self.cfg.get("calibration") or {}
         if not cal:
             return
@@ -1153,10 +1221,26 @@ class Api:
             if self._win is not None:
                 self._win.resize(w, h)
                 _rebuild_layered_hit_test(self._win)
+                t = threading.Timer(0.15, self._repair_transparency)
+                t.daemon = True
+                t.start()
                 return True
         except Exception:
             pass
         return False
+
+    def _repair_transparency(self):
+        """WebView2 透明窗口 resize 后 alpha 命中区域不跟随新尺寸，导致点击穿透。
+        翻转 WS_EX_LAYERED 强制系统重建分层表面（修命中），再 hide+show 让
+        WebView2 重新合成透明表面（恢复视觉透明）。"""
+        try:
+            win = self._win
+            if win is None:
+                return
+            win.hide()
+            win.show()
+        except Exception:
+            pass
 
     def quit(self):
         try:
@@ -1180,9 +1264,9 @@ def _set_layered(hwnd):
 
 
 def _rebuild_layered_hit_test(win):
-    """resize 后 WebView2 的合成表面（alpha 命中区域）不会跟随新尺寸，
+    """resize 时 WebView2 的合成表面（alpha 命中区域）不会跟随新尺寸变化，
     导致新区域点击穿透。同步翻转 WS_EX_LAYERED 强制系统重建分层表面。
-    toggle 会清掉 COLORKEY 透明属性, 需要重设 (否则页面透明区变键色实色块)。"""
+    toggle 会清除 COLORKEY 透明属性，需要重建(否则页面透明区变键色实色)。"""
     try:
         native = getattr(win, "native", None)
         if native is None or not getattr(native, "Handle", None):
@@ -1195,8 +1279,6 @@ def _rebuild_layered_hit_test(win):
         if ex & WS_EX_LAYERED:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
-        # 重设 COLORKEY: 窗体键色 (1,2,3) 透明化, 页面透明区域真穿透
-        user32.SetLayeredWindowAttributes(hwnd, 0x030201, 0, 0x1)
     except Exception:
         pass
 
@@ -1204,17 +1286,12 @@ def _rebuild_layered_hit_test(win):
 def _enable_layered_watcher():
     def run():
         user32 = ctypes.windll.user32
-        while True:
-            for title in ("Go \u7528\u91cf", "Go Console"):
+        for _ in range(60):
+            for title in ("Go 用量", "Go Console"):
                 hwnd = user32.FindWindowW(None, title)
                 if hwnd:
                     _set_layered(hwnd)
-                    # 保活 COLORKEY 透明 (键色 1,2,3 透明化)
-                    try:
-                        user32.SetLayeredWindowAttributes(hwnd, 0x030201, 0, 0x1)
-                    except Exception:
-                        pass
-            time.sleep(1.0)
+            time.sleep(0.5)
 
     threading.Thread(target=run, daemon=True).start()
 

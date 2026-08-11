@@ -1,0 +1,13 @@
+{
+  "name": "opencode-widget-electron",
+  "version": "1.0.0",
+  "description": "OpenCode Go usage widget (Electron frontend, Python data server)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^43.3.0"
+  }
+}

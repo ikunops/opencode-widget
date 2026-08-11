@@ -36,7 +36,7 @@
   }
   .app::before { content: ""; position: absolute; inset: 0; border-radius: var(--radius); border: 1px solid var(--border-light); pointer-events: none; }
 
-  header { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px 5px; -webkit-app-region: drag; flex-shrink: 0; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 3px; -webkit-app-region: drag; flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 8px; }
   .mark { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--violet)); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700; }
   .title { font-size: 13px; font-weight: 700; color: var(--text); }
@@ -119,9 +119,9 @@
   .d-list-card .m-item .rem { font-size: 11px; }
 
   /* ---- small (最小化) ---- */
-  .small { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 6px; }
+  .small { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 4px; }
   .small.on { display: flex; }
-  .s-top { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .s-top { display: flex; align-items: stretch; gap: 10px; flex: 1; min-height: 0; }
   .s-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .s-sup { font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-model { font-size: 11px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -132,9 +132,15 @@
   .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--glass); border: 1px solid var(--border); border-radius: 7px; }
   .s-grid .sg b { color: var(--text); font-weight: 700; }
   /* 小窗圆环内文字缩小, 避免与圆环重叠 */
-  .small .rc .label { font-size: calc(6.5px * var(--scale, 1)); margin-top: calc(-13px * var(--scale, 1)); }
-  .small .rc .amount { font-size: 13px; font-weight: 600; }
+  .small .rc .label { font-size: calc(8.5px * var(--scale, 1)); margin-top: calc(-17px * var(--scale, 1)); }
+  .small .rc .amount { font-size: 17px; font-weight: 700; }
   .small .ring-sub { font-size: 7.5px; }
+  .small .ringbox { flex: 0 0 40%; height: 100%; min-width: 0; }
+  .small .ringbox svg { height: calc(100% - 26px); }
+  .small .s-info { flex: 1; height: 100%; min-width: 0; }
+  .small .s-sup { margin-top: auto; }
+  .small .s-grid { font-size: 10px; grid-template-columns: 1fr; gap: 3px; margin-top: auto; }
+  footer .s-hint { flex: 1; text-align: center; }
 
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
@@ -196,7 +202,6 @@
   footer { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px 9px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--faded); flex-shrink: 0; }
   .cal-badge { color: var(--green); }
 
-
   .op-wrap { display: flex; align-items: center; gap: 4px; -webkit-app-region: no-drag; }
   .op-label { font-size: 9px; color: var(--dim); min-width: 26px; text-align: right; }
   #opSlider { -webkit-appearance: none; width: 62px; height: 3px; border-radius: 2px; background: var(--track); outline: none; cursor: pointer; }
@@ -245,7 +250,7 @@
     <!-- small (最小化: 圆环 + 供应商/模型 + 迷你统计) -->
     <div class="small" id="smallView">
       <div class="s-top">
-        <div class="ringbox" style="width:165px;height:135px">
+        <div class="ringbox">
           <svg viewBox="0 0 118 118">
             <circle class="ring ring-track" cx="59" cy="59" r="28"/>
             <circle class="ring ring-track" cx="59" cy="59" r="41"/>
@@ -265,10 +270,9 @@
           <div class="s-sup" id="sSupplier">OpenCode Go</div>
           <div class="s-model" id="sModel">—</div>
           <div class="s-mstats" id="sMStats"></div>
-          <div class="s-hint" id="sHint">←→ 供应商 · ↑↓ 模型</div>
+      <div class="s-grid" id="sGrid"></div>
         </div>
       </div>
-      <div class="s-grid" id="sGrid"></div>
     </div>
 
     <!-- compact -->
@@ -350,17 +354,18 @@
 
   <footer>
     <span id="footLeft">—</span>
+    <span class="s-hint" id="sHint">←→ 供应商 · ↑↓ 模型</span>
     <span><span id="calBadge" class="cal-badge"></span><span id="footRight"></span></span>
   </footer>
 </div>
 
 <div class="ctx" id="ctx">
   <button data-a="refresh">立即刷新</button>
-  <button data-a="login">打开 Console 登录</button>
-  <button data-a="grab">自动抓取 Cookie 同步真值</button>
-  <button data-a="server">服务端设置（手动）…</button>
-  <button data-a="calibrate">手动校准…</button>
-  <button data-a="key">API Key 设置…</button>  <div class="sep"></div>
+  <button data-a="login">用 Console 登录</button>
+  <button data-a="grab">自动抓取 Cookie 同步数值</button>
+  <button data-a="server">服务器配置（手动）</button>
+  <button data-a="calibrate">手动校准</button>
+  <button data-a="key">API Key 设置</button>  <div class="sep"></div>
   <button data-a="quit">退出</button>
 </div>
 
@@ -420,7 +425,7 @@ let state = { windows: [], stats: [], history: [], suppliers: {}, heatmap: [], m
 let lastCal = null;
 let uiState = "mid";   // small | mid | large
 let selModel = null;
-let selSupplier = null; // null = 全部
+let selSupplier = "go"; // null = 全部
 let heatRange = "30";    // 热力图范围: 7 | 30 | all
 let mFilter = "all";
 let mUnit = "count";
@@ -549,7 +554,6 @@ function renderTabs() {
 function filteredStats() {
   let st = state.stats;
   if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
-  // 供应商过滤只作用于显式选 "go" 时; "全部"/"free" 显示所有 (free 跨供应商共享)
   if (mFilter === "go" && uiState !== "mid") st = st.filter(x => (x.source || "").includes("go"));
   return st;
 }
@@ -811,11 +815,17 @@ function renderSmall() {
   $("#sLabel").textContent = state.mode === "overview" ? "总用量" : periodName(state.mode);
   $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
   $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(agg.cost) + " $ " + agg.count + "次" : "";
-  $("#sSupplier").textContent = selSupplier ? (SUPPLIER_NAMES[selSupplier] || selSupplier) : "opencode go";
-  // 模型: 键盘选中的 selModel 优先, 否则当前供应商下用量最多的模型
-  let curModel = selModel ? state.stats.find(x => x.key === selModel) : null;
+  $("#sSupplier").textContent = selSupplier ? (SUPPLIER_NAMES[selSupplier] || selSupplier) : "全部";
+  // 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
+  let curModel = null;
+  if (selModel) {
+    const m = state.stats.find(x => x.key === selModel);
+    if (m && (!selSupplier || (m.source || "").includes(selSupplier))) curModel = m;
+  }
   if (!curModel) {
-    const srcStats = state.stats.filter(x => x.source === selSupplier || (x.source || "").includes(selSupplier));
+    const srcStats = selSupplier
+      ? state.stats.filter(x => (x.source || "").includes(selSupplier))
+      : state.stats;
     curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0))[0] || null;
   }
   $("#sModel").textContent = curModel ? `${curModel.name} · ${(curModel.count_total || 0).toLocaleString()} 次` : "—";
@@ -836,13 +846,13 @@ function renderSmall() {
   }
   const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
   const rows = [
-    ["总Token", fmtTokens(agg.tokens), "总费用", money(agg.cost)],
-    ["输入", fmtTokens(agg.input), "请求", (agg.count || 0) + " 次"],
-    ["输出", fmtTokens(agg.output), "活跃天数", (agg.days || 0) + " 天"],
-    ["缓存", fmtTokens(agg.cache), "占比", pct.toFixed(1) + "%"],
+    ["总Token", fmtTokens(agg.tokens)],
+    ["总费用", money(agg.cost)],
+    ["总次数", (agg.count || 0) + " 次"],
+    ["活跃天数", (agg.days || 0) + " 天"],
   ];
-  grid.innerHTML = rows.map(([a, b, c, d]) =>
-    `<div class="sg"><span>${a} <b>${b}</b></span><span>${c} <b>${d}</b></span></div>`).join("");
+  grid.innerHTML = rows.map(([a, b]) =>
+    `<div class="sg"><span>${a}</span><b>${b}</b></div>`).join("");
 }
 
 const HEAT_COLORS = ["#1a2333", "#2b3a67", "#3f55a8", "#6366f1", "#8b8bf5", "#a5a5ff"];
@@ -942,8 +952,8 @@ function renderLarge() {
 
 async function refresh() {
   try {
-    if (!window.pywebview || !window.pywebview.api) { setTimeout(refresh, 500); return; }
-    const data = await window.pywebview.api.get_snapshot();
+    if (!window.widgetAPI) { setTimeout(refresh, 500); return; }
+    const data = await window.widgetAPI.fetchState();
     state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
     state.suppliers = data.suppliers || {};
     state.heatmap = data.heatmap || [];
@@ -967,11 +977,11 @@ function setUiState(v) {
   $("#compactView").style.display = v === "mid" ? "flex" : "none";
   $("#dashView").classList.toggle("on", onLarge);
   if (v === "small") {
-    window.pywebview.api.resize_window(SMALL_W, SMALL_H);
+    window.widgetAPI.resize("small");
   } else {
-    window.pywebview.api.resize_window(onLarge ? EXPAND_W : 560, onLarge ? EXPAND_H : COMPACT_H);
+    window.widgetAPI.resize(onLarge ? "large" : "mid");
   }
-  try { window.pywebview.api.save_ui_state(v); } catch (_) {}
+  try { localStorage.setItem("uiState", v); window.widgetAPI.saveUiState(v); } catch (_) {}
   setTimeout(() => render(), 250);
 }
 
@@ -1000,9 +1010,8 @@ function applyOpacity(v) {
 }
 async function initOpacity() {
   try {
-    if (!window.pywebview || !window.pywebview.api) { setTimeout(initOpacity, 500); return; }
-    const v = await window.pywebview.api.get_opacity();
-    applyOpacity(v || 0.72);
+    const v = Number(localStorage.getItem("opacity") || 0.72);
+    applyOpacity(v);
   } catch (_) { setTimeout(initOpacity, 500); }
 }
 document.addEventListener("DOMContentLoaded", () => {
@@ -1010,50 +1019,58 @@ document.addEventListener("DOMContentLoaded", () => {
     if (sl) sl.addEventListener("input", () => {
       const v = Number(sl.value) / 100;
       applyOpacity(v);
-      window.pywebview.api.save_opacity(v);
-      window.pywebview.api.apply_opacity();
+      localStorage.setItem("opacity", String(v));
     });
 });
 async function initExpanded() {
   try {
-    const v = await window.pywebview.api.get_ui_state();
+    const v = localStorage.getItem("uiState") || "mid";
     if (v === "small") setUiState("small");
     else if (v === "large") setUiState("large");
   } catch (_) {}
 }
 
 async function showServer() {
-  const d = await window.pywebview.api.get_server_config() || {};
-  $("#srvCookie").value = d.auth_cookie || ""; $("#srvWs").value = d.workspace_id || "";
+  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
+  const srv = d.server || {};
+  $("#srvCookie").value = srv.auth_cookie || ""; $("#srvWs").value = srv.workspace_id || "";
   $("#srvMsg").textContent = ""; showModal("serverMask");
 }
 async function showCal() {
-  const c = await window.pywebview.api.get_calibration() || {};
+  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
+  const c = d.calibration || {};
   $("#calS").value = c.session ?? ""; $("#calW").value = c.weekly ?? ""; $("#calM").value = c.monthly ?? "";
   const s = win("session"), w = win("weekly"), m = win("monthly");
-  $("#locS").textContent = " 本地 " + (s ? Math.round(s.pct) : 0) + "%";
-  $("#locW").textContent = " 本地 " + (w ? Math.round(w.pct) : 0) + "%";
-  $("#locM").textContent = " 本地 " + (m ? Math.round(m.pct) : 0) + "%";
+  $("#locS").textContent = " 当前 " + (s ? Math.round(s.pct) : 0) + "%";
+  $("#locW").textContent = " 当前 " + (w ? Math.round(w.pct) : 0) + "%";
+  $("#locM").textContent = " 当前 " + (m ? Math.round(m.pct) : 0) + "%";
   $("#calMsg").textContent = ""; showModal("calMask");
 }
 async function showKey() {
-  $("#keyInput").value = (await window.pywebview.api.get_key()) || "";
+  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
+  $("#keyInput").value = d.api_key || "";
   $("#keyMsg").textContent = ""; showModal("keyMask");
 }
-async function doGrab() {
-  const res = await window.pywebview.api.grab_cookie();
-  if (res && res.ok) {
-    await refresh();
-    if (state.server) alert("✓ 已抓取 Cookie，服务端真值已同步！");
-    else alert("Cookie 已保存，但用量页解析失败：" + (state.server_error || "未知") + "\n请确认 Console 窗口已打开用量页后重试。");
-  } else {
-    alert("抓取失败：" + (res && res.error ? res.error : "未知错误"));
-  }
+async function doLogin() {
+  const r = await window.widgetAPI.openLogin();
+  if (!r || !r.opened) { alert("登录窗口启动失败：" + (r && r.error ? r.error : "未知错误")); return; }
+  alert("登录窗口已打开，请在窗口中完成登录，登录成功后将自动保存并同步官方数值");
+  setTimeout(refresh, 5000);
 }
+async function doGrab() {
+  const cfg = await fetch("http://127.0.0.1:8765/api/config").then(x => x.json()).catch(() => ({}));
+  const srv = cfg.server || {};
+  if (!srv.auth_cookie) { alert("未找到登录 Cookie，请先右键 → 用 Console 登录，在窗口中完成登录后再试"); return; }
+  const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步请求失败" }));
+  await refresh();
+  if (s.ok) alert("已同步官方数值");
+  else alert("同步失败：" + (s.error || "未知错误"));
+}
+
 
 $("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small");
 $("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large");
-$("#btnClose").onclick = () => window.pywebview.api.quit();
+$("#btnClose").onclick = () => window.widgetAPI.quit();
 
 // 键盘导航: ←→ 切供应商, ↑↓ 切模型 (小窗/大窗生效)
 function cycleSupplier(dir) {
@@ -1062,6 +1079,7 @@ function cycleSupplier(dir) {
   if (!selSupplier || !list.includes(selSupplier)) selSupplier = list[0];
   const i = list.indexOf(selSupplier);
   selSupplier = list[(i + dir + list.length) % list.length];
+  selModel = null;
   render();
 }
 function cycleModel(dir) {
@@ -1117,37 +1135,58 @@ $("#ctx").addEventListener("click", (e) => {
   const a = b.dataset.a;
   hideCtx();
   if (a === "refresh") refresh();
-  if (a === "login") window.pywebview.api.open_console();
+  if (a === "login") doLogin();
   if (a === "grab") doGrab();
   if (a === "server") showServer();
   if (a === "calibrate") showCal();
   if (a === "key") showKey();
-  if (a === "quit") window.pywebview.api.quit();
+  if (a === "quit") window.widgetAPI.quit();
 });
 
 $("#calSave").onclick = async () => {
   const v = { session: +$("#calS").value || 0, weekly: +$("#calW").value || 0, monthly: +$("#calM").value || 0 };
-  const ok = await window.pywebview.api.save_calibration(v.session, v.weekly, v.monthly);
-  $("#calMsg").textContent = ok ? "已保存 ✓" : "保存失败";
-  if (ok) { setTimeout(() => hideModal("calMask"), 900); refresh(); }
+  const r = await fetch("http://127.0.0.1:8765/api/calibrate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(v),
+  }).then(r => r.json()).catch(() => ({ ok: false }));
+  $("#calMsg").textContent = r.ok ? "已保存 ✓" : "保存失败";
+  if (r.ok) { setTimeout(() => hideModal("calMask"), 900); refresh(); }
 };
-$("#calClear").onclick = async () => { await window.pywebview.api.save_calibration(0, 0, 0); $("#calMsg").textContent = "已清除"; refresh(); };
+$("#calClear").onclick = async () => {
+  await fetch("http://127.0.0.1:8765/api/calibrate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session: 0, weekly: 0, monthly: 0 }),
+  }).catch(() => {});
+  $("#calMsg").textContent = "已清除"; refresh();
+};
 $("#keySave").onclick = async () => {
-  const ok = await window.pywebview.api.save_key($("#keyInput").value.trim());
-  $("#keyMsg").textContent = ok ? "Key 已保存 ✓" : "保存失败";
-  if (ok) { setTimeout(() => hideModal("keyMask"), 900); refresh(); }
+  const r = await fetch("http://127.0.0.1:8765/api/key", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: $("#keyInput").value.trim() }),
+  }).then(r => r.json()).catch(() => ({ ok: false }));
+  $("#keyMsg").textContent = r.ok ? "Key 已保存 ✓" : "保存失败";
+  if (r.ok) { setTimeout(() => hideModal("keyMask"), 900); refresh(); }
 };
 $("#keyCancel").onclick = () => hideModal("keyMask");
 $("#srvSave").onclick = async () => {
-  const ok = await window.pywebview.api.save_server_config($("#srvCookie").value.trim(), $("#srvWs").value.trim());
-  $("#srvMsg").textContent = "已保存，测试中…";
-  if (ok) {
-    await refresh();
-    if (state.server) { $("#srvMsg").textContent = "✓ 服务端连接成功"; setTimeout(() => hideModal("serverMask"), 1200); }
-    else $("#srvMsg").textContent = "✗ " + (state.server_error || "连接失败");
-  } else $("#srvMsg").textContent = "保存失败";
+  const r = await fetch("http://127.0.0.1:8765/api/server", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auth_cookie: $("#srvCookie").value.trim(), workspace_id: $("#srvWs").value.trim() }),
+  }).then(r => r.json()).catch(() => ({ ok: false }));
+  if (!r.ok) { $("#srvMsg").textContent = "保存失败"; return; }
+  $("#srvMsg").textContent = "已保存，正在同步…";
+  const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步失败" }));
+  await refresh();
+  if (s.ok) { $("#srvMsg").textContent = "✓ 服务器数值已同步"; setTimeout(() => hideModal("serverMask"), 1200); }
+  else $("#srvMsg").textContent = "已保存，但同步失败：" + (s.error || "未知错误");
 };
-$("#srvClear").onclick = async () => { await window.pywebview.api.save_server_config("", ""); $("#srvMsg").textContent = "已清除"; refresh(); };
+$("#srvClear").onclick = async () => {
+  await fetch("http://127.0.0.1:8765/api/server", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auth_cookie: "", workspace_id: "" }),
+  }).catch(() => {});
+  $("#srvMsg").textContent = "已清除"; refresh();
+};
 ["serverMask","calMask","keyMask"].forEach(id => {
   $("#" + id).addEventListener("click", (e) => { if (e.target === $("#" + id)) $("#" + id).classList.remove("show"); });
 });
@@ -1159,7 +1198,7 @@ document.querySelector("header").addEventListener("mousedown", (e) => {
 });
 document.addEventListener("mousemove", (e) => {
   if (!dragging) return;
-  window.pywebview.api.move_window(e.screenX - ox, e.screenY - oy);
+  
   ox = e.screenX; oy = e.screenY;
 });
 document.addEventListener("mouseup", () => { dragging = false; });
