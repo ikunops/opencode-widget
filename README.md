@@ -4,6 +4,8 @@ OpenCode / Codex / Go 用量悬浮窗 —— 透明玻璃面板，实时显示 O
 
 ![OpenCode-widget 截图](screenshot.png)
 
+![OpenCode-widget 大屏](screenshot-large.png)
+
 ## 特性
 
 - **透明悬浮窗**：Electron 原生透明窗口，背景透出桌面，文字与 SVG 内容保持清晰（CSS 逐像素 alpha，拖动滑块调节）
