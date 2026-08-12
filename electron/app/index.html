@@ -702,8 +702,8 @@ function renderChart() {
   }
   if (!item || !item.series.length) { svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = ""; return; }
   const isFree = !!item.is_free;
-  // 跟随右上角天数: 7/30/all
-  const days = heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
+  // 跟随右上角天数: 1(今天)/7/30/all
+  const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
   let pts = item.series;
   if (days > 0) {
     const cutoff = new Date();
@@ -926,7 +926,6 @@ function renderLarge() {
   const list = activeSuppliers();
   const src = selSupplier && list.includes(selSupplier) ? selSupplier : "all";
   const srcName = src === "all" ? "全部供应商" : (SUPPLIER_NAMES[src] || src);
-  const agg = src === "all" ? allAgg() : supAgg(src);
 
   // ---- 供应商 tabs ----
   const tabs = $("#dSupTabs");
@@ -941,14 +940,33 @@ function renderLarge() {
   // ---- 时间范围 ----
   const range = $("#dRange");
   if (range) {
-    range.innerHTML = [["7", "7天"], ["30", "30天"], ["all", "全部"]]
+    range.innerHTML = [["1", "今天"], ["7", "7天"], ["30", "30天"], ["all", "全部"]]
       .map(([v, n]) => `<button class="r-btn${heatRange === v ? " on" : ""}" data-r="${v}">${n}</button>`).join("");
     range.querySelectorAll(".r-btn").forEach(b => {
       b.onclick = () => { heatRange = b.dataset.r; render(); };
     });
   }
 
-  // ---- 统计卡 ----
+  // ---- 统计卡（跟随供应商 + 时间范围）----
+  const hmRows = state.heatmap.filter(x => src === "all" || x.src === src);
+  const nowD = new Date();
+  const startD = new Date(nowD);
+  if (heatRange === "1") startD.setUTCHours(0, 0, 0, 0);
+  else if (heatRange === "7") startD.setUTCDate(startD.getUTCDate() - 6);
+  else if (heatRange === "30") startD.setUTCDate(startD.getUTCDate() - 29);
+  const startDate = heatRange === "all" ? "" : startD.toISOString().slice(0, 10);
+  const agg = { tokens: 0, cost: 0, count: 0, input: 0, output: 0, cache: 0, days: new Set() };
+  hmRows.forEach(x => {
+    if (startDate && x.date < startDate) return;
+    agg.tokens += x.tokens || 0;
+    agg.cost += x.cost || 0;
+    agg.count += x.count || 0;
+    agg.input += x.input || 0;
+    agg.output += x.output || 0;
+    agg.cache += x.cache || 0;
+    agg.days.add(x.date);
+  });
+  agg.days = agg.days.size;
   const row = $("#dStatsRow");
   if (row) {
     const cards = [
@@ -965,13 +983,14 @@ function renderLarge() {
   }
 
   // ---- GitHub 风格热力图 (周列日历) ----
-  const rows = state.heatmap.filter(x => src === "all" || x.src === src);
+  const rows = hmRows;
   const byDate = {};
   rows.forEach(x => { byDate[x.date] = { count: x.count, tokens: x.tokens, cost: x.cost }; });
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   let start = new Date();
-  if (heatRange === "7") start.setDate(start.getDate() - 6);
+  if (heatRange === "1") start.setHours(0, 0, 0, 0);
+  else if (heatRange === "7") start.setDate(start.getDate() - 6);
   else if (heatRange === "30") start.setDate(start.getDate() - 29);
   else {
     const dates = Object.keys(byDate).sort();

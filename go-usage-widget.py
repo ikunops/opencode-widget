@@ -757,8 +757,8 @@ def supplier_stats(rows):
 
 
 def heatmap(rows, days=None):
-    """按天聚合热力图数据: 每供应商每天的 cost/count/tokens。
-    days=None 表示全量; 返回 [{date, src, cost, count, tokens}], 按 date+src 排序。"""
+    """按天聚合热力图数据: 每供应商每天的 cost/count/tokens/input/output/cache。
+    days=None 表示全量; 返回 [{date, src, cost, count, tokens, input, output, cache}], 按 date+src 排序。"""
     now_ms = int(time.time() * 1000)
     start = None if days is None else now_ms - days * 86400 * 1000
     buckets = {}
@@ -772,12 +772,16 @@ def heatmap(rows, days=None):
         to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-        b = buckets.setdefault((d, src), [0.0, 0, 0])
+        b = buckets.setdefault((d, src), [0.0, 0, 0, 0, 0])
         b[0] += r.get("cost") or 0.0
         b[1] += 1
-        b[2] += ti + to + tc
-    out = [{"date": d, "src": s, "cost": round(c, 4), "count": n, "tokens": t}
-           for (d, s), (c, n, t) in sorted(buckets.items())]
+        b[2] += ti
+        b[3] += to
+        b[4] += tc
+    out = [{"date": d, "src": s, "cost": round(c, 4), "count": n,
+            "input": int(ti), "output": int(to), "cache": int(tc),
+            "tokens": int(ti + to + tc)}
+           for (d, s), (c, n, ti, to, tc) in sorted(buckets.items())]
     return out
 
 
