@@ -1114,6 +1114,7 @@ function cycleModel(dir) {
   render();
 }
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") { e.preventDefault(); return; }
   if (uiState === "mid") return;
   if (e.key === "ArrowLeft") { cycleSupplier(-1); e.preventDefault(); }
   else if (e.key === "ArrowRight") { cycleSupplier(1); e.preventDefault(); }
