@@ -330,7 +330,7 @@
       <div class="d-stats-row" id="dStatsRow"></div>
       <div class="d-heat-card" id="dHeatmap"></div>
       <div class="d-bottom">
-        <div class="d-chart">
+        <div class="d-chart" id="dChart">
           <div class="chart-title" id="dChartTitle">点击模型查看曲线</div>
           <div class="chart-note" id="chartNote">近 14 天费用(USD)</div>
           <div class="d-detail" id="dModelDetail"></div>
@@ -785,43 +785,45 @@ function renderChart() {
   title.textContent = `${item.name} · ${rngLabel} ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
 
   // 自定义 hover tooltip：划过任意日期显示当天 Token/次数/费用
-  const chartBox = $("#dChart");
-  let tipEl = $("#chartTip");
-  if (!tipEl) {
-    tipEl = document.createElement("div");
-    tipEl.id = "chartTip";
-    tipEl.className = "chart-tip";
-    chartBox.appendChild(tipEl);
-  }
-  const byDateMap = {};
-  pts.forEach(p => { byDateMap[p.date] = p; });
-  svg.onmousemove = (e) => {
-    const svgRect = svg.getBoundingClientRect();
-    const scaleX = svgRect.width / W;
-    const mx = (e.clientX - svgRect.left) / scaleX;
-    if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
-    const ratio = Math.max(0, Math.min(1, (mx - PAD_L) / xSpan));
-    const idx = Math.round(ratio * (dates.length - 1));
-    const d = dates[idx];
-    const p = byDateMap[d];
-    let html = `<div class="ct-date">${d}</div>`;
-    if (p) {
-      const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
-      html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
-      html += `<div class="ct-row"><span>次数</span><b>${p.count || 0}</b></div>`;
-      html += `<div class="ct-row"><span>费用</span><b>${money(p.cost || 0)}</b></div>`;
-    } else {
-      html += `<div class="ct-empty">无使用</div>`;
+  try {
+    const chartBox = $("#dChart");
+    let tipEl = $("#chartTip");
+    if (!tipEl) {
+      tipEl = document.createElement("div");
+      tipEl.id = "chartTip";
+      tipEl.className = "chart-tip";
+      chartBox.appendChild(tipEl);
     }
-    tipEl.innerHTML = html;
-    tipEl.style.display = "block";
-    const boxRect = chartBox.getBoundingClientRect();
-    const tx = e.clientX - boxRect.left + 12;
-    const ty = e.clientY - boxRect.top + 12;
-    tipEl.style.left = Math.min(tx, boxRect.width - 130) + "px";
-    tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
-  };
-  svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
+    const byDateMap = {};
+    pts.forEach(p => { byDateMap[p.date] = p; });
+    svg.onmousemove = (e) => {
+      const svgRect = svg.getBoundingClientRect();
+      const scaleX = svgRect.width / W;
+      const mx = (e.clientX - svgRect.left) / scaleX;
+      if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
+      const ratio = Math.max(0, Math.min(1, (mx - PAD_L) / xSpan));
+      const idx = Math.round(ratio * (dates.length - 1));
+      const d = dates[idx];
+      const p = byDateMap[d];
+      let html = `<div class="ct-date">${d}</div>`;
+      if (p) {
+        const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
+        html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
+        html += `<div class="ct-row"><span>次数</span><b>${p.count || 0}</b></div>`;
+        html += `<div class="ct-row"><span>费用</span><b>${money(p.cost || 0)}</b></div>`;
+      } else {
+        html += `<div class="ct-empty">无使用</div>`;
+      }
+      tipEl.innerHTML = html;
+      tipEl.style.display = "block";
+      const boxRect = chartBox.getBoundingClientRect();
+      const tx = e.clientX - boxRect.left + 12;
+      const ty = e.clientY - boxRect.top + 12;
+      tipEl.style.left = Math.min(tx, boxRect.width - 130) + "px";
+      tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
+    };
+    svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
+  } catch (_) { /* hover tooltip 失败不影响图表 */ }
 }
 
 function renderStats() {
