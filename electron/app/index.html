@@ -186,7 +186,12 @@
   .heat-dow span { height: 14px; line-height: 14px; }
 
   .d-bottom { flex: 1; display: flex; gap: 8px; min-height: 0; }
-  .d-chart { flex: 1 1 58%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .d-chart { flex: 1 1 58%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; position: relative; }
+  .chart-tip { position: absolute; display: none; z-index: 5; pointer-events: none; background: rgba(21, 27, 42, 0.96); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 6px 9px; font-size: 10px; color: var(--text); box-shadow: 0 6px 20px rgba(0,0,0,0.45); min-width: 118px; }
+  .chart-tip .ct-date { font-weight: 700; color: #c7c9ff; margin-bottom: 3px; }
+  .chart-tip .ct-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.5; }
+  .chart-tip .ct-row b { font-weight: 600; }
+  .chart-tip .ct-empty { opacity: 0.5; }
   .chart-title { font-size: 12.5px; color: var(--text); font-weight: 500; text-align: center; flex-shrink: 0; letter-spacing: 0.3px; }
   .chart-note { font-size: 10px; color: var(--faded); text-align: center; flex-shrink: 0; }
   .d-chart svg { flex: 1 1 auto; width: 100%; min-height: 0; }
@@ -765,21 +770,58 @@ function renderChart() {
       inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d}</text>`;
     }
   });
-  // 数据点 + tooltip（只画有数据的日期）
+  // 数据点（hover 详情由自定义 tooltip 提供）
   pts.forEach((p) => {
     const px = xOf(p.date), py = y(valOf(p));
-    const vv = valOf(p);
-    const tip = `${p.date} · ${isFree ? fmtTokens(vv) + " tok" : "$" + vv.toFixed(3)}${p.count ? " · " + p.count + "次" : ""}`;
     if (pts.length <= 60) {
-      inner += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="2" fill="#a5b4fc" opacity="0.9"><title>${tip}</title></circle>`;
+      inner += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="2" fill="#a5b4fc" opacity="0.9"></circle>`;
     } else {
-      inner += `<rect x="${(px-2).toFixed(1)}" y="${(py-2).toFixed(1)}" width="4" height="4" fill="#a5b4fc" opacity="0.7"><title>${tip}</title></rect>`;
+      inner += `<rect x="${(px-2).toFixed(1)}" y="${(py-2).toFixed(1)}" width="4" height="4" fill="#a5b4fc" opacity="0.7"></rect>`;
     }
   });
   svg.innerHTML = inner;
   const total = vals.reduce((a, v) => a + v, 0);
   const maxP = Math.max(...vals);
   title.textContent = `${item.name} · ${rngLabel} ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
+
+  // 自定义 hover tooltip：划过任意日期显示当天 Token/次数/费用
+  const chartBox = $("#dChart");
+  let tipEl = $("#chartTip");
+  if (!tipEl) {
+    tipEl = document.createElement("div");
+    tipEl.id = "chartTip";
+    tipEl.className = "chart-tip";
+    chartBox.appendChild(tipEl);
+  }
+  const byDateMap = {};
+  pts.forEach(p => { byDateMap[p.date] = p; });
+  svg.onmousemove = (e) => {
+    const svgRect = svg.getBoundingClientRect();
+    const scaleX = svgRect.width / W;
+    const mx = (e.clientX - svgRect.left) / scaleX;
+    if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
+    const ratio = Math.max(0, Math.min(1, (mx - PAD_L) / xSpan));
+    const idx = Math.round(ratio * (dates.length - 1));
+    const d = dates[idx];
+    const p = byDateMap[d];
+    let html = `<div class="ct-date">${d}</div>`;
+    if (p) {
+      const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
+      html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
+      html += `<div class="ct-row"><span>次数</span><b>${p.count || 0}</b></div>`;
+      html += `<div class="ct-row"><span>费用</span><b>${money(p.cost || 0)}</b></div>`;
+    } else {
+      html += `<div class="ct-empty">无使用</div>`;
+    }
+    tipEl.innerHTML = html;
+    tipEl.style.display = "block";
+    const boxRect = chartBox.getBoundingClientRect();
+    const tx = e.clientX - boxRect.left + 12;
+    const ty = e.clientY - boxRect.top + 12;
+    tipEl.style.left = Math.min(tx, boxRect.width - 130) + "px";
+    tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
+  };
+  svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
 }
 
 function renderStats() {
