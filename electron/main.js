@@ -112,6 +112,9 @@ ipcMain.handle('resize', (e, uiState) => {
   let ny = bounds.y + Math.floor((bounds.height - size[1]) / 2);
   // 吸顶保持：窗口顶边原本贴在工作区顶部时，缩放后仍贴顶（避免掉下来）
   if (Math.abs(bounds.y - wa.y) <= 12) ny = wa.y;
+  // 防超出屏幕：窗口完整保持在工作区内（否则顶部被遮住无法拖动）
+  nx = Math.max(wa.x, Math.min(nx, wa.x + wa.width - size[0]));
+  ny = Math.max(wa.y, Math.min(ny, wa.y + wa.height - size[1]));
   win.setBounds({ x: nx, y: ny, width: size[0], height: size[1] });
   return true;
 });
