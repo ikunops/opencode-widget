@@ -966,8 +966,7 @@ function renderLarge() {
 
 async function refresh() {
   try {
-    if (!window.widgetAPI) { setTimeout(refresh, 500); return; }
-    const data = await window.widgetAPI.fetchState();
+    const data = await fetch("http://127.0.0.1:8765/api/state").then(r => r.json());
     state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
     state.suppliers = data.suppliers || {};
     state.heatmap = data.heatmap || [];
@@ -1223,8 +1222,8 @@ function syncScale() {
   document.documentElement.style.setProperty("--scale", String(s));
 }
 window.addEventListener("resize", syncScale);
-setTimeout(initExpanded, 1200);
-setTimeout(refresh, 800);
+setTimeout(initExpanded, 200);
+setTimeout(refresh, 100);
 syncScale();
 setInterval(refresh, 60000);
 setInterval(render, 1000);

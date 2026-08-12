@@ -166,7 +166,20 @@ def _collect_rows():
         extra = [r for r in local_rows if r["model"] not in srv_models]
         return srv_rows + extra, cost_map
     go_rows = gw.read_opencode_all()
-    cx_rows, _ = gw.read_codex_logs(0)
+    # codex 日志增量读取（记住上次 id，避免每次全量）
+    try:
+        cfg = gw.load_config()
+        last_id = cfg.get("codex_log_id") or 0
+    except Exception:
+        last_id = 0
+    cx_rows, new_id = gw.read_codex_logs(last_id)
+    if new_id > last_id:
+        try:
+            cfg = gw.load_config()
+            cfg["codex_log_id"] = new_id
+            gw.save_config(cfg)
+        except Exception:
+            pass
     return go_rows + cx_rows, {}
 
 
@@ -312,7 +325,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def preheat():
+    """启动时后台预热：提前算好 state 并写入缓存，前端首请求立即命中。"""
+    try:
+        with CACHE["lock"]:
+            CACHE["state"] = build_state()
+            CACHE["ts"] = time.time()
+    except Exception:
+        pass
+
+
 def main():
+    threading.Thread(target=preheat, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"[data-server] listening on http://127.0.0.1:{PORT}/api/state")
     srv.serve_forever()

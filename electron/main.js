@@ -1,9 +1,5 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
-const fs = require('fs');
-
-const DATA_URL = 'http://127.0.0.1:8765';
-const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
 
 const SIZES = {
   small: [540, 260],
@@ -119,42 +115,10 @@ ipcMain.handle('resize', (e, uiState) => {
   return true;
 });
 
-ipcMain.handle('get-pos', () => {
-  if (!win) return { x: 0, y: 0 };
-  const [x, y] = win.getPosition();
-  return { x, y };
-});
-
-ipcMain.handle('move-to', (e, x, y) => {
-  if (!win) return true;
-  const px = Math.round(x);
-  const py = Math.round(y);
-  const d = screen.getDisplayNearestPoint({ x: px, y: py });
-  const wa = d.workArea;
-  let ny = py;
-  updateSnap(px, py);
-  // 吸顶：未吸顶时窗口顶边靠近工作区顶部才贴齐；已吸顶时允许自由拖动（解除由 updateSnap 的迟滞负责）
-  if (!snapped && Math.abs(py - wa.y) <= SNAP_NEAR) ny = wa.y;
-  win.setPosition(px, ny);
-  return true;
-});
-
-ipcMain.handle('set-opacity', (e, v) => {
-  // 透明度由前端 CSS --alpha 控制（仅背景透明，文字/SVG 内容保持不透明）
-  return true;
-});
-
 ipcMain.handle('quit', () => {
   app.quit();
   return true;
 });
-
-ipcMain.handle('fetch-state', async () => {
-  const res = await fetch(DATA_URL + '/api/state');
-  return res.json();
-});
-
-let loginWin = null;
 
 ipcMain.handle('open-login', async () => {
   try {
@@ -166,16 +130,4 @@ ipcMain.handle('open-login', async () => {
   }
 });
 
-ipcMain.handle('grab-cookie', async () => {
-  // cookie 由 login_console.py 直接写入 config.json；这里只返回配置状态供前端判断
-  try {
-    const res = await fetch(DATA_URL + '/api/config');
-    const d = await res.json();
-    return { cookie: (d.server || {}).auth_cookie || '', workspace_id: (d.server || {}).workspace_id || '' };
-  } catch (_) {
-    return { cookie: '', workspace_id: '' };
-  }
-});
-
-ipcMain.handle('save-opacity', (e, v) => v);
 ipcMain.handle('save-ui-state', (e, s) => { curUiState = s; return s; });
