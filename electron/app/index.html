@@ -1050,15 +1050,19 @@ async function showKey() {
   $("#keyMsg").textContent = ""; showModal("keyMask");
 }
 async function doLogin() {
-  const r = await window.widgetAPI.openLogin();
-  if (!r || !r.opened) { alert("登录窗口启动失败：" + (r && r.error ? r.error : "未知错误")); return; }
-  alert("登录窗口已打开，请在窗口中完成登录，登录成功后将自动保存并同步官方数值");
-  setTimeout(refresh, 5000);
+  try {
+    const r = await window.widgetAPI.openLogin();
+    if (!r || !r.opened) { alert("无法打开浏览器：" + (r && r.error ? r.error : "未知错误")); return; }
+  } catch (e) {
+    alert("打开浏览器失败：" + (e.message || e));
+    return;
+  }
+  alert("已在系统浏览器中打开 opencode.ai/auth\n\n请按以下步骤操作：\n\n1. 在浏览器中用你的账号登录 opencode.ai\n2. 登录成功后，地址栏会跳转到类似：\n   https://opencode.ai/workspace/wrk_xxxxx/go\n3. 按 F12 → Application → Cookies → 复制 auth 的值\n4. 回到悬浮窗，右键 → 服务端设置\n5. 粘贴 auth_cookie 和 workspace_id（从 URL 里拿）→ 保存\n6. 右键 → 拉取官方数值 → 完成");
 }
 async function doGrab() {
   const cfg = await fetch("http://127.0.0.1:8765/api/config").then(x => x.json()).catch(() => ({}));
   const srv = cfg.server || {};
-  if (!srv.auth_cookie) { alert("未找到登录 Cookie，请先右键 → 用 Console 登录，在窗口中完成登录后再试"); return; }
+  if (!srv.auth_cookie) { alert("未配置 auth_cookie：\n1. 右键 → Console 登录（用系统浏览器登录你的 opencode.ai 账号）\n2. 右键 → 服务端设置，粘贴 auth_cookie + workspace_id"); return; }
   const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步请求失败" }));
   await refresh();
   if (s.ok) alert("已同步官方数值");
@@ -1070,11 +1074,12 @@ $("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small");
 $("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large");
 $("#btnClose").onclick = () => window.widgetAPI.quit();
 
-// 键盘导航: ←→ 切供应商, ↑↓ 切模型 (小窗/大窗生效)
+// 键盘导航: ←→ 切供应商(含"全部"), ↑↓ 切模型 (小窗/大窗生效)
 function cycleSupplier(dir) {
-  const list = activeSuppliers();
-  if (!list.length) return;
-  if (!selSupplier || !list.includes(selSupplier)) selSupplier = list[0];
+  const real = activeSuppliers();
+  if (!real.length) return;
+  const list = [null, ...real]; // null = "全部", 与 tab 栏顺序一致
+  if (!list.includes(selSupplier)) selSupplier = real[0];
   const i = list.indexOf(selSupplier);
   selSupplier = list[(i + dir + list.length) % list.length];
   selModel = null;
@@ -1082,13 +1087,16 @@ function cycleSupplier(dir) {
 }
 function cycleModel(dir) {
   const key = "count_total";
-  const list = filteredStats()
+  let list = filteredStats();
+  // 供应商 tab 选中时只在该供应商的模型间切换（free 模型跨供应商共享 source，不含 "go"）
+  if (selSupplier) list = list.filter(x => (x.source || "").includes(selSupplier));
+  const keys = list
     .sort((a, b) => (b[key] || 0) - (a[key] || 0))
     .map(x => x.key);
-  if (!list.length) return;
-  if (!selModel || !list.includes(selModel)) selModel = list[0];
-  const i = list.indexOf(selModel);
-  selModel = list[(i + dir + list.length) % list.length];
+  if (!keys.length) return;
+  if (!selModel || !keys.includes(selModel)) selModel = keys[0];
+  const i = keys.indexOf(selModel);
+  selModel = keys[(i + dir + keys.length) % keys.length];
   render();
 }
 document.addEventListener("keydown", (e) => {
@@ -1191,6 +1199,7 @@ $("#srvClear").onclick = async () => {
 
 
 window.widgetAPI.onSnapSmall(() => { if (uiState !== "small") setUiState("small"); });
+window.widgetAPI.onSnapRestore((s) => { const t = s === "large" || s === "small" ? s : "mid"; if (uiState !== t) setUiState(t); });
 initOpacity();
 syncScale();
 loadViewPrefs();

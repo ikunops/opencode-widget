@@ -11,5 +11,6 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   saveOpacity: (v) => ipcRenderer.invoke('save-opacity', v),
   saveUiState: (s) => ipcRenderer.invoke('save-ui-state', s),
   onSnapSmall: (cb) => ipcRenderer.on('snap-small', () => cb()),
+  onSnapRestore: (cb) => ipcRenderer.on('snap-restore', (_e, s) => cb(s)),
   quit: () => ipcRenderer.invoke('quit'),
 });

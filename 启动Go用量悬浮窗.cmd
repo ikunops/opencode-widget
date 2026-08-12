@@ -1,4 +1,4 @@
 @echo off
-start "" "C:\Users\31807\AppData\Local\Programs\Python\Python311\pythonw.exe" "C:\Users\31807\opencode-widget\data_server.py"
+start "" "%LOCALAPPDATA%\Programs\Python\Python311\pythonw.exe" "%~dp0data_server.py"
 timeout /t 2 /nobreak >nul
-start "" "C:\Users\31807\opencode-widget\electron\node_modules\electron\dist\electron.exe" "C:\Users\31807\opencode-widget\electron"
+start "" "%~dp0electron\node_modules\electron\dist\electron.exe" "%~dp0electron"

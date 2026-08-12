@@ -6,6 +6,7 @@ Serves JSON on http://127.0.0.1:8765/api/*
 """
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -49,6 +50,7 @@ def build_state():
 
     windows = gw.build_windows(rows, now_ms)
     _apply_calibration(windows)
+    _apply_server_quota(windows)
     stats = gw.model_stats(rows, now_ms, None, all_go_models)
     history = gw.model_history(rows, days=90)
     suppliers = gw.supplier_stats(rows)
@@ -61,6 +63,7 @@ def build_state():
         pass
     cal = {k: v for k, v in (cfg.get("calibration") or {}).items() if v}
     srv_cfg = cfg.get("server") or {}
+    srv = _latest_server_quota() or None
 
     return {
         "windows": windows,
@@ -72,9 +75,9 @@ def build_state():
         "key": key_ok,
         "models": models,
         "calibration": cal if cal else None,
-        "server": None,
+        "server": srv,
         "server_error": None,
-        "server_configured": bool(srv_cfg.get("auth_cookie")),
+        "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
         "ts": now_ms,
     }
 
@@ -107,6 +110,41 @@ def _apply_calibration(windows):
         if target > w["used"]:
             w["used"] = target
             w["pct"] = min(100.0, target / limit * 100)
+        w["calibrated"] = True
+
+
+def _latest_server_quota():
+    """从 quota_snapshot 读最新一次抓取的滚动窗口百分比（官网实时值）。"""
+    db = (sd.DB_PATH if sd else os.path.join(APP_DIR, "server_usage.db"))
+    if not os.path.exists(db):
+        return []
+    try:
+        conn = sqlite3.connect(db)
+        rows = conn.execute("""
+            SELECT kind, label, pct, reset_text
+            FROM quota_snapshot
+            WHERE fetched_at = (SELECT MAX(fetched_at) FROM quota_snapshot)
+        """).fetchall()
+        conn.close()
+        return [{"kind": r[0], "label": r[1], "pct": r[2], "reset_text": r[3]} for r in rows]
+    except Exception:
+        return []
+
+
+def _apply_server_quota(windows):
+    """用官网 quota 覆盖本地计算的百分比（订阅滚动窗口 vs 本地估算）。"""
+    srv = _latest_server_quota()
+    if not srv:
+        return
+    srv_map = {w["kind"]: w for w in srv}
+    for w in windows:
+        sw = srv_map.get(w["kind"])
+        if not sw:
+            continue
+        w["pct"] = sw["pct"]
+        w["used"] = gw.LIMITS[w["kind"]] * sw["pct"] / 100.0
+        w["reset"] = sw["reset_text"]
+        w["calibrated"] = True
 
 
 def _collect_rows():
