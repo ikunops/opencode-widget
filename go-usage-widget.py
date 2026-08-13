@@ -185,11 +185,21 @@ def scan_free_models(cfg=None, force=False):
     except Exception:
         pass
     return models
+# providerID -> 供应商简名。未知 providerID 原样保留（动态自动发现新供应商），
+# 表里的映射只是把官方 ID 换成更友好的简名。
 PROVIDER_SRC = {"opencode": "zen", "opencode-go": "go", "openkilo": "kilo",
                 "tencent-tokenhub": "zen", "openrouter": "router"}
 # 模型 ID 中的 provider 前缀 (区别于模型名本身, 如 kilo-auto 不是前缀)
-PROVIDER_PREFIXES = {"tencent", "cohere", "nvidia", "google", "inclusionai",
-                     "opencode", "openkilo", "openrouter", "poolside", "stepfun", "openai"}
+# 动态扩展: 固定白名单 ∪ PROVIDER_SRC 的 key ∪ 数据中实际出现的 providerID。
+PROVIDER_PREFIXES = set({"tencent", "cohere", "nvidia", "google", "inclusionai",
+                         "opencode", "openkilo", "openrouter", "poolside", "stepfun", "openai"} |
+                        set(PROVIDER_SRC.keys()))
+
+
+def register_provider_prefix(pid):
+    """运行时注册新出现的 providerID，使 norm_model 能剥掉其模型前缀。"""
+    if pid:
+        PROVIDER_PREFIXES.add(pid)
 
 # 模型别名: 不同来源/写法的同一模型合并 (key -> 规范名)
 MODEL_ALIASES = {
@@ -243,6 +253,19 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def read_auth_cookie_from_webdata():
+    """尽力从本机 Chrome/Edge cookie 库读取 opencode.ai 的 auth cookie。
+
+    现代 Chrome(127+) 默认 app-bound 加密，DPAPI key 解不开 → 返回空字符串，
+    此时请用前端「自动抓取 Cookie」（Electron 应用内登录窗口）。
+    """
+    try:
+        import browser_cookie as bc
+        return bc.read_auth_cookie_from_webdata()
+    except Exception:
+        return ""
 
 
 def discover_go_key():
@@ -319,9 +342,12 @@ def read_opencode_all(srcs=None):
                 d = json.loads(data)
             except Exception:
                 continue
-            src = PROVIDER_SRC.get(d.get("providerID"))
-            if not src:
+            pid = d.get("providerID")
+            if not pid:
                 continue
+            # 动态供应商: 已知映射换成简名, 未知 providerID 原样保留 (自动发现新供应商)
+            src = PROVIDER_SRC.get(pid) or pid
+            register_provider_prefix(pid)
             if srcs is not None and src not in srcs:
                 continue
             t = (d.get("time") or {}).get("created")
@@ -468,8 +494,8 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
         m = r["model"]
         nm = norm_model(m)
         src = r.get("src") or "?"
-        free = is_free_model(nm) or (cost_by_model.get(nm, 0.0) <= 0)
-        key = (nm, "free") if free else (nm, "go")
+        # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 订阅/free 合集由 group 区分
+        key = (nm, src)
         if key not in stats:
             stats[key] = {"count_s": 0, "count_w": 0, "count_m": 0, "count_total": 0,
                           "cost_s": 0.0,
@@ -482,10 +508,8 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                           "sessions": 0, "prompts": 0,
                           "tok_sec_sum": 0.0, "tok_sec_n": 0,
                           "last_ts": None, "prev_ts": None,
-                          "days": set(),
-                          "srcs": set()}
+                          "days": set()}
         s = stats[key]
-        s["srcs"].add(src)
         s["days"].add(datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d"))
         s["count_total"] += 1
         # session 聚类: 同模型相邻请求间隔 > 30min 计为新会话
@@ -541,21 +565,16 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
         if r["cost"] is not None:
             s["cost_total"] += r["cost"]
 
-    src_count = {}
-    for (m, grp) in stats:
-        if grp == "free":
-            src_count[m] = src_count.get(m, 0) + 1
-
     out = []
-    for (m, grp), s in stats.items():
-        is_free = (grp == "free")
+    for (m, src), s in stats.items():
+        is_free = is_free_model(m) or (cost_by_model.get(m, 0.0) <= 0)
         group = "free" if is_free else "go"
         base = m.replace("-free", "").replace(":free", "")
         name = DISPLAY_NAMES.get(m) or DISPLAY_NAMES.get(base) or base
-        if is_free and src_count.get(m, 0) > 1:
-            name = f"{name} ({len(s['srcs'])})"
         if not is_free:
-            if m in cost_map:
+            # 官方 cost_summary 是 go 配额全量(含网关调用), 仅覆盖 go 来源条目;
+            # 其他来源(如 gateway)保留本地聚合的 cost, 避免被官方全量吞掉
+            if src == "go" and m in cost_map:
                 s["cost_total"] = cost_map[m]
             # 反推 token 配额: go 模型只有 $60/月 费用配额, 用当月均价换算 token 配额
             # 用行级当月费用 (与 tokens_m 同一窗口), 避免 cost_map 跨月汇总导致比例失真
@@ -575,15 +594,14 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                 s["tp_m"] = min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0 
                 s["tp_w"] = min(100.0, tok_w / s["tq_w"] * 100) if s["tq_w"] else 0.0
                 s["tp_s"] = min(100.0, tok_s / s["tq_s"] * 100) if s["tq_s"] else 0.0
-        out_srcs = sorted(s["srcs"])
         # 官方估算: 次均费用 = 月配额$60 / 官方月请求数; 每 token 费用 = 次均 / 官方每次请求 token
         req_lim = REQ_LIMITS.get(m)
         est_req_cost = (60.0 / req_lim[2]) if req_lim and req_lim[2] else 0.0
         est_tok_cost = (est_req_cost / TOKENS_PER_REQ[m]) if (m in TOKENS_PER_REQ and TOKENS_PER_REQ[m]) else 0.0
         out.append({
             "model": m,
-            "source": out_srcs[0] if len(out_srcs) == 1 else "/".join(out_srcs),
-            "key": f"{m}|{grp}",
+            "source": src,
+            "key": f"{m}|{src}",
             "is_free": is_free,
             "group": group,
             "name": name,
@@ -675,7 +693,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
 def model_history(rows, days=14):
     buckets = {}
     now_ms = int(time.time() * 1000)
-    start = now_ms - days * 86400 * 1000
+    start = 0 if not days else now_ms - days * 86400 * 1000
     cost_by_model = {}
     for r in rows:
         if r["ts"] < start:
@@ -686,11 +704,11 @@ def model_history(rows, days=14):
     for r in rows:
         if r["ts"] < start:
             continue
-        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%m-%d")
+        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
         m = norm_model(r["model"])
         src = r.get("src") or "?"
-        free = is_free_model(m) or (cost_by_model.get(m, 0.0) <= 0)
-        key = (m, src) if free else (m, "go")
+        # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 不再统一归 go
+        key = (m, src)
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
         b[0] += r["cost"] if r["cost"] is not None else 0.0
         b[1] += 1
@@ -700,19 +718,12 @@ def model_history(rows, days=14):
         cache = tk.get("cache") or {}
         b[4] += (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
 
-    src_count = {}
-    for (m, src) in buckets:
-        if is_free_model(m):
-            src_count[m] = src_count.get(m, 0) + 1
-
     out = []
     for (m, src), days_map in buckets.items():
         series = [{"date": k, "cost": round(v[0], 4), "count": v[1],
                    "tokens_in": v[2], "tokens_out": v[3], "tokens_cache": v[4]}
                   for k, v in sorted(days_map.items())]
         name = DISPLAY_NAMES.get(m, m)
-        if is_free_model(m) and src_count.get(m, 0) > 1:
-            name = f"{name} ({src})"
         out.append({"model": m, "source": src, "key": f"{m}|{src}",
                     "name": name, "is_free": is_free_model(m),
                     "series": series})
@@ -725,9 +736,14 @@ SUPPLIER_NAMES = {"go": "OpenCode Go", "zen": "OpenCode Zen",
 SUPPLIER_ORDER = ["go", "zen", "kilo", "router"]
 
 
+# gateway 是 go 配额的子集(本地网关转发到 go), 「全部」聚合时不计入, 避免重复计数
+SUBSET_SRCS = {"gateway": "go"}
+
+
 def supplier_stats(rows):
     """按供应商聚合全量统计 (小窗 + 大窗汇总)。
-    返回 {src: {tokens, cost, input, output, cache, count, days}}, 含 "all" 合计。"""
+    返回 {src: {tokens, cost, input, output, cache, count, days}}, 含 "all" 合计。
+    "all" 排除子集来源 (gateway 已含于 go)。"""
     agg = {}
     for r in rows:
         src = r.get("src") or "?"
@@ -739,6 +755,8 @@ def supplier_stats(rows):
         cost = r.get("cost") or 0.0
         d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
         for key in (src, "all"):
+            if key == "all" and src in SUBSET_SRCS:
+                continue
             s = agg.setdefault(key, {"tokens": 0, "cost": 0.0, "input": 0, "output": 0,
                                      "cache": 0, "count": 0, "days": set()})
             s["tokens"] += ti + to + tc

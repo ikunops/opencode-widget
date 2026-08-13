@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -311,7 +311,7 @@
           <div class="m-head-bar">
             <div class="m-filters" id="cFilters">
               <button class="f-btn on" data-f="all">全部</button>
-              <button class="f-btn" data-f="go">go</button>
+              <button class="f-btn" data-f="go">订阅</button>
               <button class="f-btn" data-f="free">free</button>
             </div>
             <button class="unit-btn" id="cUnitBtn" title="切换 次数/Token">次数</button>
@@ -345,7 +345,7 @@
             <div class="m-head-bar">
               <div class="m-filters" id="dFilters">
                 <button class="f-btn on" data-f="all">全部</button>
-                <button class="f-btn" data-f="go">go</button>
+                <button class="f-btn" data-f="go">订阅</button>
                 <button class="f-btn" data-f="free">free</button>
               </div>
               <button class="unit-btn" id="dUnitBtn" title="切换 次数/Token">次数</button>
@@ -377,10 +377,10 @@
 <div class="modal-mask" id="serverMask">
   <div class="modal" style="width:380px;">
     <h3>服务端设置（手动）</h3>
-    <p>一般用右键「自动抓取 Cookie」即可。手动：登录 opencode.ai → F12 → Application → Cookies → 复制 <b>auth</b>；workspace ID 在用量页 URL。</p>
+    <p>一般用右键「自动抓取 Cookie」即可（应用内登录自动获取）。手动：登录 opencode.ai → F12 → Application → Cookies → 复制 <b>auth</b>；workspace ID 在用量页 URL。</p>
     <div class="m-row"><span>auth Cookie</span><input id="srvCookie" style="width:200px" placeholder="粘贴 auth"></div>
     <div class="m-row"><span>Workspace ID</span><input id="srvWs" style="width:200px" placeholder="wrk_xxxx"></div>
-    <div class="m-btns"><button class="btn-ghost" id="srvClear">清除</button><button class="btn-primary" id="srvSave">保存并测试</button></div>
+    <div class="m-btns"><button class="btn-ghost" id="srvGrab">应用内自动抓取</button><button class="btn-ghost" id="srvClear">清除</button><button class="btn-primary" id="srvSave">保存并测试</button></div>
     <div class="m-msg" id="srvMsg"></div>
   </div>
 </div>
@@ -423,8 +423,29 @@ const RING_KEYS = ["session", "weekly", "monthly"];
 const RING_R = [28, 41, 52];
 const COMPACT_H = 480, EXPAND_W = 960, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 260;
 
+// 供应商动态自动发现：固定顺序优先，其余按数据里出现的 src 追加（新接入的 provider 自动出现）
 const SUPPLIER_ORDER = ["go", "zen", "kilo", "router"];
-const SUPPLIER_NAMES = { go: "OpenCode Go", zen: "OpenCode Zen", kilo: "Kilo", router: "OpenRouter" };
+const SUPPLIER_NAMES = { go: "OpenCode Go", zen: "OpenCode Zen", kilo: "Kilo", router: "OpenRouter",
+                         gateway: "AI Gateway", deepseek: "DeepSeek 官方", openai: "OpenAI" };
+// 模型列表条目的供应商前缀 (简写 tag)
+const SUPPLIER_TAG = { go: "go", zen: "zen", kilo: "kilo", router: "rt", gateway: "gw" };
+// 子集来源: 其用量已含于另一供应商 (gateway 是 go 配额的子集), 「全部」聚合时排除
+const SUBSET_SRCS = ["gateway"];
+// 大窗供应商 tab 轮播: 「全部」固定, 具体供应商窗口槽位数
+const SUP_TABS_MAX = 5;
+let supOffset = 0;
+function supName(s) {
+  return SUPPLIER_NAMES[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+}
+function supTag(s) {
+  return SUPPLIER_TAG[s] || s;
+}
+function supplierList() {
+  const have = state.suppliers || {};
+  const known = SUPPLIER_ORDER.filter(s => have[s]);
+  const extra = Object.keys(have).filter(s => s !== "all" && !SUPPLIER_ORDER.includes(s) && have[s]);
+  return [...known, ...extra];
+}
 
 let state = { windows: [], stats: [], history: [], suppliers: {}, heatmap: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
 let lastCal = null;
@@ -511,9 +532,10 @@ function render() {
   fitAmount();
   setRing(0, s.pct); setRing(1, w.pct); setRing(2, m.pct);
   if (!selModel && state.stats.length) {
-    const withHist = state.stats.find(x => state.history.some(h =>
-      (h.key === x.key) || String(x.key).startsWith((h.model || "") + "|")));
-    selModel = (withHist || state.stats[0]).key;
+    let cands = rankSortedStats();
+    if (selSupplier) cands = cands.filter(x => (x.source || "") === selSupplier);
+    const withHist = cands.find(x => state.history.some(h => h.key === x.key));
+    selModel = (withHist || cands[0] || state.stats[0]).key;
   }
   renderSide(); renderTabs(); renderModels(); renderChart();
   renderSmall();
@@ -559,22 +581,43 @@ function renderTabs() {
 function filteredStats() {
   let st = state.stats;
   if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
-  if (mFilter === "go" && uiState !== "mid") st = st.filter(x => (x.source || "").includes("go"));
   return st;
+}
+
+// 模型列表/上下键共用的排序: 外层供应商固定顺序, 内层使用量
+// (Token 模式统一按 token; 默认: 订阅组按费用=配额消耗, free 组按次数)
+function rankSortedStats() {
+  const stats = filteredStats();
+  const key = modelKey();
+  const mode = state.mode === "overview" ? "monthly" : state.mode;
+  const costOf = x => mode === "weekly" ? (x.cost_w || 0) : mode === "monthly" ? (x.cost_m || 0) : (x.cost_s || 0);
+  const tokOf = x => (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0);
+  const rankVal = x => mUnit === "token" ? tokOf(x) : (x.group === "go" ? costOf(x) : (x[key] || 0));
+  const supplierRank = s => { const i = SUPPLIER_ORDER.indexOf(s); return i >= 0 ? i : 100; };
+  return [...stats].sort((a, b) => {
+    const ra = supplierRank(a.source), rb = supplierRank(b.source);
+    if (ra !== rb) return ra - rb;
+    return rankVal(b) - rankVal(a);
+  });
 }
 
 function fillModelList(el, key) {
   el.innerHTML = "";
   const stats = filteredStats();
-  const sorted = [...stats].sort((a, b) => modelValue(b, key) - modelValue(a, key));
-  const total = sorted.reduce((a, x) => a + modelValue(x, key), 0) || 1;
   const mode = state.mode === "overview" ? "monthly" : state.mode;
   const quotaWin = win(mode);
   const quotaLimit = (quotaWin && quotaWin.limit) || 60;
   const costOf = x => mode === "weekly" ? (x.cost_w || 0) : mode === "monthly" ? (x.cost_m || 0) : (x.cost_s || 0);
-  // go 配额是共享费用池: 剩余费用 = 窗口配额 - 所有 go 模型已消费
+  const tokOf = x => (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0);
+  // 排序两层: 外层供应商固定顺序, 内层使用量 (Token 模式统一按 token; 默认: 订阅组按费用=配额消耗, free 组按次数)
+  const rankVal = x => mUnit === "token" ? tokOf(x) : (x.group === "go" ? costOf(x) : (x[key] || 0));
+  const sorted = rankSortedStats();
+  const total = sorted.reduce((a, x) => a + rankVal(x), 0) || 1;
+  // go 配额是共享费用池: 消耗统一取官方窗口 used(server 权威, 已含网关调用), 避免条目 cost 重复计
   const goStats = stats.filter(x => x.group === "go");
-  const usedAll = goStats.reduce((a, x) => a + costOf(x), 0);
+  const usedAll = (quotaWin && quotaWin.used != null && quotaWin.used > 0)
+    ? quotaWin.used
+    : goStats.reduce((a, x) => a + costOf(x), 0);
   const remainAll = Math.max(0, quotaLimit - usedAll);
   sorted.forEach(x => {
     const div = document.createElement("div");
@@ -585,6 +628,7 @@ function fillModelList(el, key) {
     div.className = "m-item" + (selModel === mKey ? " sel" : "") + (isFree ? " free" : "") + (unused ? " unused" : "");
     const val = modelValue(x, key);
     const isQuota = x.group === "go" && !isTok;
+    const srcTag = (x.source && x.source !== "known" && x.source !== "?") ? `[${supTag(x.source)}] ` : "";
     let main = isTok ? fmtTokens(val) : val + "次";
     let barPct = 0, extra = "", rem = "";
     if (isQuota) {
@@ -627,8 +671,18 @@ function fillModelList(el, key) {
       extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
     }
     const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
-    div.innerHTML = `<span class="nm" title="${x.model}">${x.name}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
-    div.onclick = () => { selModel = selModel === mKey ? null : mKey; render(); };
+    div.innerHTML = `<span class="nm" title="${x.model}">${srcTag}${x.name}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
+    div.onclick = () => {
+      if (selModel === mKey) selModel = null;
+      else {
+        selModel = mKey;
+        // 点击条目联动: 曲线/热力图切到该条目所属供应商 (来源未知或不存在则不切)
+        if (x.source && x.source !== "known" && x.source !== "?" && supplierList().includes(x.source)) {
+          selSupplier = x.source;
+        }
+      }
+      render();
+    };
     el.appendChild(div);
   });
 }
@@ -676,11 +730,12 @@ function renderChart() {
   const detail = $("#dModelDetail");
   if (!selModel) { svg.innerHTML = ""; title.textContent = "点击模型查看曲线"; if (note) note.textContent = "费用/Token 曲线"; if (detail) detail.innerHTML = ""; return; }
   const selKey = String(selModel);
-  const item = state.history.find(h => (h.key || h.model) === selKey) ||
-               state.history.find(h => selKey.startsWith((h.model || "") + "|"));
+  // 曲线跟随供应商: 选中具体供应商时只取该来源的桶 (「全部」时按条目 key 精确匹配)
+  const item = state.history.find(h => h.key === selKey
+    && (!selSupplier || h.source === selSupplier)) ||
+               state.history.find(h => h.key === selKey);
   // 模型详情条
-  const statItem = state.stats.find(x => x.key === selKey) ||
-                   state.stats.find(x => selKey.startsWith((x.model || "") + "|"));
+  const statItem = state.stats.find(x => x.key === selKey);
   if (detail && statItem) {
     const s = statItem;
     const tot = (s.tokens_in || 0) + (s.tokens_out || 0) + (s.tokens_cache || 0);
@@ -697,29 +752,20 @@ function renderChart() {
       ["提示词", (s.prompts || 0) + " 条"],
       ["活跃", (s.days || 0) + " 天"],
     ];
-    detail.innerHTML = `<div class="d-detail-name">${s.name || s.model}</div>` +
+    detail.innerHTML = `<div class="d-detail-name">${(s.source && s.source !== "known" && s.source !== "?") ? `[${supTag(s.source)}] ` : ""}${s.name || s.model}</div>` +
       cells.map(([k, v]) => `<span class="d-detail-cell"><b>${k}</b>${v}</span>`).join("");
   }
   if (!item || !item.series.length) { svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = ""; return; }
   const isFree = !!item.is_free;
-  // 跟随右上角天数: 1(今天)/7/30/all
+  // 跟随右上角天数: 1(今天)/7/30/all, 与热力图语义一致 (UTC 当天 0 点起)
   const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
   let pts = item.series;
   if (days > 0) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().slice(5, 10);
-    const today = new Date();
-    const todayStr = today.toISOString().slice(5, 10);
-    pts = pts.filter(p => {
-      const m = String(p.date);
-      if (m.length === 5) {
-        if (m > todayStr) return false;
-        const cy = today.getFullYear();
-        return (cy + "-" + m) >= (cutoff.getFullYear() + "-" + cutoffStr);
-      }
-      return p.date >= cutoff.toISOString().slice(0, 10);
-    });
+    const cut = new Date();
+    cut.setUTCHours(0, 0, 0, 0);
+    if (days > 1) cut.setUTCDate(cut.getUTCDate() - (days - 1));
+    const cutoffStr = cut.toISOString().slice(0, 10);
+    pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
   }
   if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
   const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
@@ -735,7 +781,7 @@ function renderChart() {
   const t0 = parseD(pts[0].date), t1 = parseD(pts[pts.length - 1].date);
   const dates = [];
   for (let t = new Date(t0); t <= t1; t.setDate(t.getDate() + 1)) {
-    dates.push(String(t.getMonth() + 1).padStart(2, "0") + "-" + String(t.getDate()).padStart(2, "0"));
+    dates.push(t.toISOString().slice(0, 10));
   }
   const xSpan = W - PAD_L - PAD_R;
   const xOf = (d) => PAD_L + (dates.indexOf(d) / Math.max(1, dates.length - 1)) * xSpan;
@@ -763,11 +809,11 @@ function renderChart() {
   inner += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>`;
   inner += `<path d="${area}" fill="url(#${gradId})"/>`;
   inner += `<path d="${line}" fill="none" stroke="#818cf8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  // 日期标签：连续日期均匀分布（约每 40px 一个）
+  // 日期标签：连续日期均匀分布（约每 40px 一个），显示 MM-DD
   const labelStep = Math.max(1, Math.ceil(xSpan / 40));
   dates.forEach((d, i) => {
     if (i % labelStep === 0 || i === dates.length - 1) {
-      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d}</text>`;
+      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
     }
   });
   // 数据点（hover 详情由自定义 tooltip 提供）
@@ -852,7 +898,7 @@ function renderStats() {
 }
 
   function activeSuppliers() {
-    const list = SUPPLIER_ORDER.filter(s => state.suppliers[s]);
+    const list = supplierList();
     return list.length ? list : SUPPLIER_ORDER.slice(0, 1);
   }
 function supAgg(src) {
@@ -873,7 +919,7 @@ function renderSmall() {
   $("#sLabel").textContent = state.mode === "overview" ? "总用量" : periodName(state.mode);
   $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
   $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(agg.cost) + " $ " + agg.count + "次" : "";
-  $("#sSupplier").textContent = selSupplier ? (SUPPLIER_NAMES[selSupplier] || selSupplier) : "全部";
+  $("#sSupplier").textContent = selSupplier ? supName(selSupplier) : "全部";
   // 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
   let curModel = null;
   if (selModel) {
@@ -927,15 +973,21 @@ function renderLarge() {
   if (!box) return;
   const list = activeSuppliers();
   const src = selSupplier && list.includes(selSupplier) ? selSupplier : "all";
-  const srcName = src === "all" ? "全部供应商" : (SUPPLIER_NAMES[src] || src);
+  const srcName = src === "all" ? "全部供应商" : supName(src);
 
-  // ---- 供应商 tabs ----
+  // ---- 供应商 tabs (轮播: 「全部」固定, 具体供应商窗口 5 槽位, 选中项超窗时平移) ----
   const tabs = $("#dSupTabs");
   if (tabs) {
-    tabs.innerHTML = [["all", "全部"], ...list.map(s => [s, SUPPLIER_NAMES[s] || s])]
+    if (supOffset > Math.max(0, list.length - SUP_TABS_MAX)) supOffset = Math.max(0, list.length - SUP_TABS_MAX);
+    const winS = list.slice(supOffset, supOffset + SUP_TABS_MAX);
+    tabs.innerHTML = [["all", "全部"], ...winS.map(s => [s, supName(s)])]
       .map(([s, n]) => `<button class="sup-tab${src === s ? " on" : ""}" data-sup="${s}">${n}</button>`).join("");
     tabs.querySelectorAll(".sup-tab").forEach(b => {
-      b.onclick = () => { selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup; render(); };
+      b.onclick = () => {
+        selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup;
+        selModel = null;  // 切供应商重选该供应商下用量最大的模型
+        render();
+      };
     });
   }
 
@@ -950,7 +1002,9 @@ function renderLarge() {
   }
 
   // ---- 统计卡（跟随供应商 + 时间范围）----
-  const hmRows = state.heatmap.filter(x => src === "all" || x.src === src);
+  const hmRows = state.heatmap.filter(x => src === "all"
+    ? !SUBSET_SRCS.includes(x.src)
+    : x.src === src);
   const nowD = new Date();
   const startD = new Date(nowD);
   if (heatRange === "1") startD.setUTCHours(0, 0, 0, 0);
@@ -1136,12 +1190,25 @@ async function doLogin() {
   alert("已在系统浏览器中打开 opencode.ai/auth\n\n请按以下步骤操作：\n\n1. 在浏览器中用你的账号登录 opencode.ai\n2. 登录成功后，地址栏会跳转到类似：\n   https://opencode.ai/workspace/wrk_xxxxx/go\n3. 按 F12 → Application → Cookies → 复制 auth 的值\n4. 回到悬浮窗，右键 → 服务端设置\n5. 粘贴 auth_cookie 和 workspace_id（从 URL 里拿）→ 保存\n6. 右键 → 拉取官方数值 → 完成");
 }
 async function doGrab() {
-  const cfg = await fetch("http://127.0.0.1:8765/api/config").then(x => x.json()).catch(() => ({}));
-  const srv = cfg.server || {};
-  if (!srv.auth_cookie) { alert("未配置 auth_cookie：\n1. 右键 → Console 登录（用系统浏览器登录你的 opencode.ai 账号）\n2. 右键 → 服务端设置，粘贴 auth_cookie + workspace_id"); return; }
+  // 自动抓取登录态：优先应用内登录窗口（可靠），其次系统浏览器手动流程
+  let auth_cookie = "", workspace_id = "";
+  try {
+    const r = await window.widgetAPI.grabAuth();
+    if (r && r.ok) { auth_cookie = r.auth_cookie; workspace_id = r.workspace_id; }
+    else if (r && r.error) { alert("自动抓取失败：" + r.error); return; }
+  } catch (e) {
+    alert("自动抓取失败：" + (e.message || e)); return;
+  }
+  if (!auth_cookie || !workspace_id) { alert("未能获取登录态"); return; }
+  const sv = await fetch("http://127.0.0.1:8765/api/server", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auth_cookie, workspace_id }),
+  }).then(r => r.json()).catch(() => ({}));
+  if (!sv.ok) { alert("保存登录态失败"); return; }
   const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步请求失败" }));
   await refresh();
-  if (s.ok) alert("已同步官方数值");
+  if (s.ok) alert("已自动抓取登录态并同步官方数值");
   else alert("同步失败：" + (s.error || "未知错误"));
 }
 
@@ -1158,17 +1225,21 @@ function cycleSupplier(dir) {
   if (!list.includes(selSupplier)) selSupplier = real[0];
   const i = list.indexOf(selSupplier);
   selSupplier = list[(i + dir + list.length) % list.length];
+  // 轮播: 选中项超出可见窗口时平移 (「全部」不参与平移)
+  const li = real.indexOf(selSupplier);
+  if (li >= 0) {
+    if (li < supOffset) supOffset = li;
+    else if (li >= supOffset + SUP_TABS_MAX) supOffset = li - SUP_TABS_MAX + 1;
+  }
   selModel = null;
   render();
 }
 function cycleModel(dir) {
-  const key = "count_total";
-  let list = filteredStats();
-  // 供应商 tab 选中时只在该供应商的模型间切换（free 模型跨供应商共享 source，不含 "go"）
-  if (selSupplier) list = list.filter(x => (x.source || "").includes(selSupplier));
-  const keys = list
-    .sort((a, b) => (b[key] || 0) - (a[key] || 0))
-    .map(x => x.key);
+  // 与模型列表共用同一排序, 上下键按屏幕显示顺序切换
+  let list = rankSortedStats();
+  // 供应商 tab 选中时只在该供应商的模型间切换 (分桶后 source 为单一来源)
+  if (selSupplier) list = list.filter(x => (x.source || "") === selSupplier);
+  const keys = list.map(x => x.key);
   if (!keys.length) return;
   if (!selModel || !keys.includes(selModel)) selModel = keys[0];
   const i = keys.indexOf(selModel);
@@ -1176,7 +1247,11 @@ function cycleModel(dir) {
   render();
 }
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Tab") { e.preventDefault(); return; }
+  if (e.key === "Tab") {
+    if (uiState !== "mid") cycleSupplier(1);
+    e.preventDefault();
+    return;
+  }
   if (uiState === "mid") return;
   if (e.key === "ArrowLeft") { cycleSupplier(-1); e.preventDefault(); }
   else if (e.key === "ArrowRight") { cycleSupplier(1); e.preventDefault(); }
@@ -1251,6 +1326,21 @@ $("#keySave").onclick = async () => {
   if (r.ok) { setTimeout(() => hideModal("keyMask"), 900); refresh(); }
 };
 $("#keyCancel").onclick = () => hideModal("keyMask");
+$("#srvGrab").onclick = async () => {
+  $("#srvMsg").textContent = "正在打开应用内登录窗口…";
+  try {
+    const r = await window.widgetAPI.grabAuth();
+    if (r && r.ok) {
+      $("#srvCookie").value = r.auth_cookie;
+      $("#srvWs").value = r.workspace_id;
+      $("#srvMsg").textContent = "已自动获取 ✓（可点「保存并测试」）";
+    } else {
+      $("#srvMsg").textContent = "未获取到登录态：" + (r && r.error ? r.error : "未知错误");
+    }
+  } catch (e) {
+    $("#srvMsg").textContent = "自动抓取失败：" + (e.message || e);
+  }
+};
 $("#srvSave").onclick = async () => {
   const r = await fetch("http://127.0.0.1:8765/api/server", {
     method: "POST", headers: { "Content-Type": "application/json" },

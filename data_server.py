@@ -52,7 +52,7 @@ def build_state():
     _apply_calibration(windows)
     _apply_server_quota(windows)
     stats = gw.model_stats(rows, now_ms, None, all_go_models)
-    history = gw.model_history(rows, days=90)
+    history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
     heatmap = gw.heatmap(rows)
 
@@ -162,8 +162,14 @@ def _collect_rows():
             except Exception:
                 pass
         srv_models = {r["model"] for r in srv_rows}
+        latest_fetched = sd.read_latest_fetched_at() if sd is not None else 0
         local_rows = gw.read_opencode_all()
-        extra = [r for r in local_rows if r["model"] not in srv_models]
+        # server 是权威源，但可能滞后：本地记录要么是 server 里没有的模型，
+        # 要么时间晚于 server 最近一次抓取（本地 opencode.db 实时，server 是定时抓取）。
+        # 非 go/zen 来源（gateway/kilo/router 等动态供应商）server 不覆盖，必须保留。
+        extra = [r for r in local_rows
+                 if r["model"] not in srv_models or r["ts"] > latest_fetched
+                 or r.get("src") not in ("go", "zen")]
         return srv_rows + extra, cost_map
     go_rows = gw.read_opencode_all()
     # codex 日志增量读取（记住上次 id，避免每次全量）
@@ -220,6 +226,48 @@ def _config_json():
         "server": cfg.get("server") or {"auth_cookie": "", "workspace_id": ""},
         "calibration": cfg.get("calibration") or {},
     }
+
+
+def do_grab():
+    """尽力从本机浏览器 cookie 库抓取 auth。现代 Chrome app-bound 加密下返回空。"""
+    try:
+        cookie = gw.read_auth_cookie_from_webdata()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    if not cookie:
+        return {"ok": False, "error": "未找到可解密的有效 cookie（现代 Chrome 使用 app-bound 加密，请用应用内登录窗口抓取）"}
+    try:
+        cfg = gw.load_config()
+        srv = cfg.get("server") or {}
+        ws = srv.get("workspace_id") or ""
+        if not ws:
+            # 尝试通过 /auth 重定向自动发现 workspace
+            from urllib.request import Request, urlopen
+            req = Request("https://opencode.ai/auth", headers={
+                "User-Agent": "Mozilla/5.0",
+                "Cookie": "auth=" + cookie,
+            })
+            try:
+                urlopen(req, timeout=10)
+            except Exception as e:
+                loc = None
+                if isinstance(e, Exception) and hasattr(e, "headers"):
+                    loc = e.headers.get("Location") or ""
+                m = __import__("re").search(r"/workspace/(wrk_[A-Za-z0-9]+)", str(loc))
+                if m:
+                    ws = m.group(1)
+            if not ws:
+                ws = srv.get("workspace_id") or ""
+    except Exception:
+        ws = ""
+    if ws:
+        try:
+            cfg = gw.load_config()
+            cfg["server"] = {"auth_cookie": cookie, "workspace_id": ws}
+            gw.save_config(cfg)
+        except Exception:
+            pass
+    return {"ok": True, "auth_cookie": cookie, "workspace_id": ws}
 
 
 def _send_json(self, obj, code=200):
@@ -314,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, {"ok": True})
         elif path == "/api/sync":
             _send_json(self, do_sync())
+        elif path == "/api/grab":
+            _send_json(self, do_grab())
         else:
             _send_json(self, {"ok": False, "error": "not found"}, 404)
 
@@ -335,8 +385,24 @@ def preheat():
         pass
 
 
+AUTO_SYNC_INTERVAL_S = 1800
+
+
+def auto_sync_loop():
+    """后台定期同步远程 server_usage.db（启动一次 + 每 30 分钟）。
+    server 数据是权威 go/zen 源，但会滞后于本地 opencode.db；
+    不自动同步会导致 widget 显示旧的用量。失败静默，等下一轮。"""
+    while True:
+        try:
+            do_sync()
+        except Exception:
+            pass
+        time.sleep(AUTO_SYNC_INTERVAL_S)
+
+
 def main():
     threading.Thread(target=preheat, daemon=True).start()
+    threading.Thread(target=auto_sync_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"[data-server] listening on http://127.0.0.1:{PORT}/api/state")
     srv.serve_forever()

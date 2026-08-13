@@ -379,6 +379,19 @@ def read_server_rows():
     return rows
 
 
+def read_latest_fetched_at():
+    """usage_records 里最近一次抓取时刻（ms）。0 = 无数据。"""
+    if not os.path.exists(DB_PATH):
+        return 0
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        row = conn.execute("SELECT MAX(fetched_at) FROM usage_records").fetchone()
+        conn.close()
+        return row[0] or 0
+    except Exception:
+        return 0
+
+
 def read_cost_map():
     """从 cost_summary 读取整月权威成本（跨 key 合并）: {model: usd}。"""
     if not os.path.exists(DB_PATH):

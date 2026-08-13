@@ -1,5 +1,21 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
 const path = require('path');
+
+// 登录态分区：持久化，登录一次后续免登录复用
+const LOGIN_PARTITION = 'persist:opencode-auth';
+let loginWin = null;
+
+function opencodeAuthUrl() {
+  return 'https://opencode.ai/auth';
+}
+
+async function readAuthCookieFromSession(ses) {
+  try {
+    const cookies = await ses.cookies.get({ url: 'https://opencode.ai' });
+    const auth = cookies.find(c => c.name === 'auth');
+    return auth ? auth.value : '';
+  } catch (_) { return ''; }
+}
 
 const SIZES = {
   small: [540, 260],
@@ -128,6 +144,58 @@ ipcMain.handle('open-login', async () => {
   } catch (e) {
     return { opened: false, error: String(e) };
   }
+});
+
+// 应用内登录窗口：自动抓取 auth cookie + workspace_id（替代 F12 手动复制）
+ipcMain.handle('grab-auth', async () => {
+  // 若已有有效登录态（分区 cookie + 自动重定向）则直接捕获，无需用户操作；
+  // 否则停留在登录页等用户登录后捕获。同一分区持久化，下次免登录。
+  if (loginWin) { loginWin.focus(); return { ok: false, error: '登录窗口已打开' }; }
+  const ses = session.fromPartition(LOGIN_PARTITION);
+  return new Promise((resolve) => {
+    let settled = false;
+    let poll = null;
+    const stopPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
+    const settle = (r) => { if (!settled) { settled = true; stopPoll(); resolve(r); } };
+    loginWin = new BrowserWindow({
+      width: 980, height: 700,
+      parent: win,
+      modal: true,
+      resizable: true,
+      autoHideMenuBar: true,
+      backgroundColor: '#0b0e14',
+      title: 'opencode.ai 登录',
+      webPreferences: {
+        session: ses,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    loginWin.loadURL(opencodeAuthUrl());
+    loginWin.on('closed', () => {
+      stopPoll();
+      loginWin = null;
+      settle({ ok: false, error: '登录窗口已关闭' });
+    });
+
+    const tryCapture = async () => {
+      if (settled || !loginWin || loginWin.isDestroyed()) return;
+      try {
+        const url = loginWin.webContents.getURL();
+        const m = /\/workspace\/(wrk_[A-Za-z0-9]+)/.exec(url);
+        if (!m) return;
+        const cookie = await readAuthCookieFromSession(ses);
+        if (!cookie) return;
+        settle({ ok: true, auth_cookie: cookie, workspace_id: m[1] });
+        setTimeout(() => { if (loginWin && !loginWin.isDestroyed()) loginWin.close(); }, 300);
+      } catch (_) { /* 继续等待 */ }
+    };
+    loginWin.webContents.on('did-navigate', tryCapture);
+    loginWin.webContents.on('did-redirect-navigation', tryCapture);
+    loginWin.webContents.on('did-finish-load', tryCapture);
+    // 兜底：SPA 或延迟重定向时轮询
+    poll = setInterval(tryCapture, 800);
+  });
 });
 
 ipcMain.handle('save-ui-state', (e, s) => { curUiState = s; return s; });
