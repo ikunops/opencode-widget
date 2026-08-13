@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import ctypes
 import json
 import os
@@ -127,7 +127,7 @@ DISPLAY_NAMES = {
 }
 
 FREE_SUFFIXES = ("-free", ":free", "/free")
-FREE_WHITELIST = {"big-pickle", "hy3", "hy3-preview"}
+FREE_WHITELIST = {"big-pickle"}
 
 # 排除项: 路由占位/非真实模型 (不以 free 后缀过滤它们, 单独排除)
 FREE_EXCLUDE = {"openrouter/free", "kilo-auto/free", "openrouter-free"}
@@ -484,12 +484,14 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
     ws, we = week_bounds(now_ms)
     paid_rows = [r for r in rows if r.get("cost")]
     ms, me = month_bounds(now_ms, min((r["ts"] for r in paid_rows), default=now_ms))
-    # 先统计每个模型的总 cost: 有付费记录的模型归 go 组, 完全无 cost 的归 free (如 kilo 音频模型)
+    # 先统计每个 (模型, 来源) 的总 cost: 该来源有付费记录判 go 组, 该来源完全无 cost 判 free
+    # (按来源独立, 避免 go 的付费把 kilo/zen 同一模型的免费用量误判成付费, 如 hy3)
     cost_by_model = {}
     for r in rows:
         nm = norm_model(r["model"])
+        src = r.get("src") or "?"
         if r.get("cost"):
-            cost_by_model[nm] = cost_by_model.get(nm, 0.0) + r["cost"]
+            cost_by_model[(nm, src)] = cost_by_model.get((nm, src), 0.0) + r["cost"]
     for r in rows:
         m = r["model"]
         nm = norm_model(m)
@@ -567,7 +569,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
 
     out = []
     for (m, src), s in stats.items():
-        is_free = is_free_model(m) or (cost_by_model.get(m, 0.0) <= 0)
+        is_free = is_free_model(m) or (cost_by_model.get((m, src), 0.0) <= 0)
         group = "free" if is_free else "go"
         base = m.replace("-free", "").replace(":free", "")
         name = DISPLAY_NAMES.get(m) or DISPLAY_NAMES.get(base) or base

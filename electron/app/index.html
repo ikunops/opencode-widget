@@ -187,7 +187,7 @@
 
   .d-bottom { flex: 1; display: flex; gap: 8px; min-height: 0; }
   .d-chart { flex: 1 1 58%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; position: relative; }
-  .chart-tip { position: absolute; display: none; z-index: 5; pointer-events: none; background: rgba(21, 27, 42, 0.96); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 6px 9px; font-size: 10px; color: var(--text); box-shadow: 0 6px 20px rgba(0,0,0,0.45); min-width: 118px; }
+  .chart-tip { position: absolute; display: none; z-index: 5; pointer-events: none; background: rgba(21, 27, 42, 0.96); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 6px 9px; font-size: 10px; color: var(--text); box-shadow: 0 6px 20px rgba(0,0,0,0.45); min-width: 118px; white-space: nowrap; }
   .chart-tip .ct-date { font-weight: 700; color: #c7c9ff; margin-bottom: 3px; }
   .chart-tip .ct-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.5; }
   .chart-tip .ct-row b { font-weight: 600; }
@@ -531,12 +531,13 @@ function render() {
   }
   fitAmount();
   setRing(0, s.pct); setRing(1, w.pct); setRing(2, m.pct);
-  if (!selModel && state.stats.length) {
-    let cands = rankSortedStats();
-    if (selSupplier) cands = cands.filter(x => (x.source || "") === selSupplier);
-    const withHist = cands.find(x => state.history.some(h => h.key === x.key));
-    selModel = (withHist || cands[0] || state.stats[0]).key;
-  }
+if (!selModel && state.stats.length) {
+let cands = rankSortedStats();
+// free 模式不归供应商: 初选不按供应商过滤
+if (selSupplier && mFilter !== "free") cands = cands.filter(x => (x.source || "") === selSupplier);
+const withHist = cands.find(x => state.history.some(h => h.key === x.key));
+selModel = (withHist || cands[0] || state.stats[0]).key;
+}
   renderSide(); renderTabs(); renderModels(); renderChart();
   renderSmall();
   renderLarge();
@@ -579,9 +580,11 @@ function renderTabs() {
 }
 
 function filteredStats() {
-  let st = state.stats;
-  if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
-  return st;
+    let st = state.stats;
+    // 供应商过滤仅作用于订阅模型(go): free 模型散落各来源(router/zen/kilo/known), 不归任一供应商
+    if (selSupplier && mFilter !== "free") st = st.filter(x => (x.source || "") === selSupplier);
+    if (mFilter !== "all") st = st.filter(x => x.group === mFilter);
+    return st;
 }
 
 // 模型列表/上下键共用的排序: 外层供应商固定顺序, 内层使用量
@@ -672,17 +675,17 @@ function fillModelList(el, key) {
     }
     const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
     div.innerHTML = `<span class="nm" title="${x.model}">${srcTag}${x.name}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
-    div.onclick = () => {
-      if (selModel === mKey) selModel = null;
-      else {
-        selModel = mKey;
-        // 点击条目联动: 曲线/热力图切到该条目所属供应商 (来源未知或不存在则不切)
-        if (x.source && x.source !== "known" && x.source !== "?" && supplierList().includes(x.source)) {
-          selSupplier = x.source;
-        }
-      }
-      render();
-    };
+div.onclick = () => {
+if (selModel === mKey) selModel = null;
+else {
+selModel = mKey;
+// 点击条目联动: 曲线/热力图切到该条目所属供应商 (free 模式不切, 来源未知或不存在则不切)
+if (mFilter !== "free" && x.source && x.source !== "known" && x.source !== "?" && supplierList().includes(x.source)) {
+selSupplier = x.source;
+}
+}
+render();
+};
     el.appendChild(div);
   });
 }
@@ -723,17 +726,148 @@ function renderLimits() {
   });
 }
 
+// 当前供应商(或全部)聚合历史 series: 所有模型按日期求和
+// free 模式: 聚合所有来源的 free 模型历史(不按供应商); 否则按当前供应商(或全部, 排除 gateway 子集)
+function totalSeries() {
+const src = selSupplier;
+const isFree = mFilter === "free";
+const items = state.history.filter(h => {
+if (isFree) return h.is_free;
+return src ? h.source === src : !SUBSET_SRCS.includes(h.source);
+});
+const byDate = {};
+    items.forEach(h => (h.series || []).forEach(p => {
+        const b = byDate[p.date] || (byDate[p.date] = { cost: 0, tokens: 0, count: 0 });
+        b.cost += p.cost || 0;
+        b.tokens += (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
+        b.count += p.count || 0;
+    }));
+    return Object.entries(byDate).map(([date, v]) => ({ date, ...v }));
+}
+
 function renderChart() {
-  const svg = $("#dChartSvg");
-  const note = $("#chartNote");
-  const title = $("#dChartTitle");
-  const detail = $("#dModelDetail");
-  if (!selModel) { svg.innerHTML = ""; title.textContent = "点击模型查看曲线"; if (note) note.textContent = "费用/Token 曲线"; if (detail) detail.innerHTML = ""; return; }
-  const selKey = String(selModel);
-  // 曲线跟随供应商: 选中具体供应商时只取该来源的桶 (「全部」时按条目 key 精确匹配)
-  const item = state.history.find(h => h.key === selKey
-    && (!selSupplier || h.source === selSupplier)) ||
-               state.history.find(h => h.key === selKey);
+const svg = $("#dChartSvg");
+const note = $("#chartNote");
+const title = $("#dChartTitle");
+const detail = $("#dModelDetail");
+if (!selModel || selModel === "__total__") {
+// 未选模型(或总量模式): 曲线显示当前供应商(或全部)的聚合总量, Y 轴统一 Token
+const aggSeries = totalSeries();
+const totalName = selSupplier ? supName(selSupplier) : "全部供应商";
+if (detail) detail.innerHTML = "";
+if (!aggSeries.length) {
+svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = "";
+return;
+}
+const item = { series: aggSeries, is_free: true, name: totalName + " · 全部模型" };
+const selKey = "";
+const statItem = null;
+const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
+let pts = item.series;
+if (days > 0) {
+const cut = new Date();
+cut.setUTCHours(0, 0, 0, 0);
+if (days > 1) cut.setUTCDate(cut.getUTCDate() - (days - 1));
+const cutoffStr = cut.toISOString().slice(0, 10);
+pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
+}
+if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
+const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
+if (note) note.textContent = `${rngLabel} Token(含缓存)`;
+const W = 400, H = 180, PAD_L = 42, PAD_B = 18, PAD_T = 10, PAD_R = 12;
+const vals = pts.map(p => (p.tokens || 0));
+const maxV = Math.max(...vals, 1);
+const fmtV = (v) => fmtTokens(v);
+const yr = new Date().getFullYear();
+const parseD = (s) => { s = String(s); return s.length === 10 ? new Date(s) : new Date(yr, +s.slice(0, 2) - 1, +s.slice(3, 5)); };
+pts = [...pts].sort((a, b) => parseD(a.date) - parseD(b.date));
+const t0 = parseD(pts[0].date), t1 = parseD(pts[pts.length - 1].date);
+const dates = [];
+for (let t = new Date(t0); t <= t1; t.setDate(t.getDate() + 1)) {
+dates.push(t.toISOString().slice(0, 10));
+}
+const xSpan = W - PAD_L - PAD_R;
+const xOf = (d) => PAD_L + (dates.indexOf(d) / Math.max(1, dates.length - 1)) * xSpan;
+const y = (v) => H - PAD_B - (v / maxV) * (H - PAD_T - PAD_B);
+let inner = "";
+for (let g = 0; g <= 4; g++) {
+const gy = PAD_T + (H - PAD_T - PAD_B) * g / 4;
+inner += `<line x1="${PAD_L}" y1="${gy}" x2="${W-PAD_R}" y2="${gy}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+inner += `<text x="${PAD_L-5}" y="${gy+3}" fill="#8a93a6" font-size="7.5" text-anchor="end">${fmtV(maxV*(1-g/4))}</text>`;
+}
+const valOf = (p) => (p.tokens || 0);
+const pxs = pts.map(p => ({ x: xOf(p.date), y: y(valOf(p)) }));
+let line = "";
+for (let i = 0; i < pxs.length; i++) {
+if (i === 0) { line += `M${pxs[i].x.toFixed(1)},${pxs[i].y.toFixed(1)}`; continue; }
+const p0 = pxs[i - 1], p1 = pxs[i];
+const cp1x = p0.x + (p1.x - p0.x) / 2, cp1y = p0.y;
+const cp2x = p1.x - (p1.x - p0.x) / 2, cp2y = p1.y;
+line += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+}
+const area = line + ` L${pxs[pxs.length-1].x.toFixed(1)},${H-PAD_B} L${pxs[0].x.toFixed(1)},${H-PAD_B} Z`;
+const gradId = "gfillT";
+inner += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>`;
+inner += `<path d="${area}" fill="url(#${gradId})"/>`;
+inner += `<path d="${line}" fill="none" stroke="#818cf8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+const labelStep = Math.max(1, Math.ceil(xSpan / 40));
+dates.forEach((d, i) => {
+if (i % labelStep === 0 || i === dates.length - 1) {
+inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
+}
+});
+pts.forEach((p) => {
+const px = xOf(p.date), py = y(valOf(p));
+if (pts.length <= 60) {
+inner += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="2" fill="#a5b4fc" opacity="0.9"></circle>`;
+} else {
+inner += `<rect x="${(px-2).toFixed(1)}" y="${(py-2).toFixed(1)}" width="4" height="4" fill="#a5b4fc" opacity="0.7"></rect>`;
+}
+});
+svg.innerHTML = inner;
+const total = vals.reduce((a, v) => a + v, 0);
+const maxP = Math.max(...vals);
+title.textContent = `${totalName} · ${rngLabel} ${fmtTokens(total)} · 峰值 ${fmtV(maxP)}`;
+const chartBox = $("#dChart");
+let tipEl = $("#chartTip");
+if (!tipEl) {
+tipEl = document.createElement("div");
+tipEl.id = "chartTip";
+tipEl.className = "chart-tip";
+chartBox.appendChild(tipEl);
+}
+const byDateMap = {};
+pts.forEach(p => { byDateMap[p.date] = p; });
+svg.onmousemove = (e) => {
+const svgRect = svg.getBoundingClientRect();
+const scaleX = svgRect.width / W;
+const mx = (e.clientX - svgRect.left) / scaleX;
+if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
+const di = Math.round((mx - PAD_L) / xSpan * (dates.length - 1));
+const d = dates[Math.max(0, Math.min(dates.length - 1, di))];
+const b = byDateMap[d];
+if (!b) { tipEl.style.display = "none"; return; }
+tipEl.style.display = "block";
+tipEl.innerHTML = `${d}<br><b>${fmtTokens(b.tokens || 0)}</b> tok<br>${(b.count || 0)} 次`;
+tipEl.style.left = "0px";
+const tipRect = tipEl.getBoundingClientRect();
+const boxRectT = chartBox.getBoundingClientRect();
+const pxT = e.clientX - boxRectT.left;
+// 溢出右缘时翻到鼠标左侧(钳制左边界), 否则右侧跟随
+const lx = (pxT + 14 + tipRect.width > boxRectT.width ? pxT - tipRect.width - 10 : pxT + 14);
+tipEl.style.left = Math.max(2, Math.min(lx, boxRectT.width - tipRect.width - 2)) + "px";
+// 总量模式: top 跟随鼠标 Y, 但钳制在标题区下方进入曲线区域
+const pyT = e.clientY - boxRectT.top;
+tipEl.style.top = Math.max(24, Math.min(pyT + 10, boxRectT.height - tipRect.height - 4)) + "px";
+};
+svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
+return;
+}
+const selKey = String(selModel);
+// 曲线跟随供应商: 选中具体供应商时只取该来源的桶 (free 模式/free 模型不归供应商, 按 key 精确匹配)
+const item = state.history.find(h => h.key === selKey
+&& (mFilter === "free" || !selSupplier || h.source === selSupplier)) ||
+state.history.find(h => h.key === selKey);
   // 模型详情条
   const statItem = state.stats.find(x => x.key === selKey);
   if (detail && statItem) {
@@ -861,12 +995,16 @@ function renderChart() {
         html += `<div class="ct-empty">无使用</div>`;
       }
       tipEl.innerHTML = html;
-      tipEl.style.display = "block";
-      const boxRect = chartBox.getBoundingClientRect();
-      const tx = e.clientX - boxRect.left + 12;
-      const ty = e.clientY - boxRect.top + 12;
-      tipEl.style.left = Math.min(tx, boxRect.width - 130) + "px";
-      tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
+tipEl.style.display = "block";
+const boxRect = chartBox.getBoundingClientRect();
+const px = e.clientX - boxRect.left;
+const ty = e.clientY - boxRect.top + 12;
+// 溢出右缘时翻到鼠标左侧(钳制左边界), 否则右侧跟随
+tipEl.style.left = "0px";
+const tw = tipEl.getBoundingClientRect().width;
+const lx2 = (px + 12 + tw > boxRect.width ? px - tw - 8 : px + 12);
+tipEl.style.left = Math.max(2, Math.min(lx2, boxRect.width - tw - 2)) + "px";
+tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
     };
     svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
   } catch (_) { /* hover tooltip 失败不影响图表 */ }
@@ -920,18 +1058,19 @@ function renderSmall() {
   $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
   $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(agg.cost) + " $ " + agg.count + "次" : "";
   $("#sSupplier").textContent = selSupplier ? supName(selSupplier) : "全部";
-  // 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
-  let curModel = null;
-  if (selModel) {
-    const m = state.stats.find(x => x.key === selModel);
-    if (m && (!selSupplier || (m.source || "").includes(selSupplier))) curModel = m;
-  }
-  if (!curModel) {
-    const srcStats = selSupplier
-      ? state.stats.filter(x => (x.source || "").includes(selSupplier))
-      : state.stats;
-    curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0))[0] || null;
-  }
+// 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
+let curModel = null;
+if (selModel) {
+const m = state.stats.find(x => x.key === selModel);
+// free 模式不归供应商, 跳过供应商归属校验
+if (m && (mFilter === "free" || !selSupplier || (m.source || "").includes(selSupplier))) curModel = m;
+}
+if (!curModel) {
+const srcStats = (mFilter === "free" || !selSupplier)
+? state.stats
+: state.stats.filter(x => (x.source || "").includes(selSupplier));
+curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0))[0] || null;
+}
   $("#sModel").textContent = curModel ? `${curModel.name} · ${(curModel.count_total || 0).toLocaleString()} 次` : "—";
   // 当前模型补充指标 (右侧, 供应商/模型下方)
   const mstats = $("#sMStats");
@@ -971,9 +1110,10 @@ function heatColor(v, max) {
 function renderLarge() {
   const box = $("#dHeatmap");
   if (!box) return;
-  const list = activeSuppliers();
-  const src = selSupplier && list.includes(selSupplier) ? selSupplier : "all";
-  const srcName = src === "all" ? "全部供应商" : supName(src);
+const list = activeSuppliers();
+// free 模式聚合全部来源(不归任一供应商), 否则跟随当前供应商
+const src = (mFilter === "free") ? "all" : (selSupplier && list.includes(selSupplier) ? selSupplier : "all");
+const srcName = src === "all" ? "全部供应商" : supName(src);
 
   // ---- 供应商 tabs (轮播: 「全部」固定, 具体供应商窗口 5 槽位, 选中项超窗时平移) ----
   const tabs = $("#dSupTabs");
@@ -982,13 +1122,14 @@ function renderLarge() {
     const winS = list.slice(supOffset, supOffset + SUP_TABS_MAX);
     tabs.innerHTML = [["all", "全部"], ...winS.map(s => [s, supName(s)])]
       .map(([s, n]) => `<button class="sup-tab${src === s ? " on" : ""}" data-sup="${s}">${n}</button>`).join("");
-    tabs.querySelectorAll(".sup-tab").forEach(b => {
-      b.onclick = () => {
-        selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup;
-        selModel = null;  // 切供应商重选该供应商下用量最大的模型
-        render();
-      };
-    });
+tabs.querySelectorAll(".sup-tab").forEach(b => {
+b.onclick = () => {
+selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup;
+mFilter = "all"; // 切供应商默认回"全部"分类
+selModel = "__total__"; // 切供应商默认显示总量曲线(不出现在模型明细)
+render();
+};
+});
   }
 
   // ---- 时间范围 ----
@@ -1224,27 +1365,37 @@ function cycleSupplier(dir) {
   const list = [null, ...real]; // null = "全部", 与 tab 栏顺序一致
   if (!list.includes(selSupplier)) selSupplier = real[0];
   const i = list.indexOf(selSupplier);
-  selSupplier = list[(i + dir + list.length) % list.length];
-  // 轮播: 选中项超出可见窗口时平移 (「全部」不参与平移)
-  const li = real.indexOf(selSupplier);
-  if (li >= 0) {
-    if (li < supOffset) supOffset = li;
-    else if (li >= supOffset + SUP_TABS_MAX) supOffset = li - SUP_TABS_MAX + 1;
-  }
-  selModel = null;
-  render();
+selSupplier = list[(i + dir + list.length) % list.length];
+mFilter = "all"; // 左右键切供应商同样回到"全部"分类
+// 轮播: 选中项超出可见窗口时平移 (「全部」不参与平移)
+const li = real.indexOf(selSupplier);
+if (li >= 0) {
+if (li < supOffset) supOffset = li;
+else if (li >= supOffset + SUP_TABS_MAX) supOffset = li - SUP_TABS_MAX + 1;
+}
+selModel = "__total__"; // 切供应商默认显示总量曲线
+render();
 }
 function cycleModel(dir) {
-  // 与模型列表共用同一排序, 上下键按屏幕显示顺序切换
-  let list = rankSortedStats();
-  // 供应商 tab 选中时只在该供应商的模型间切换 (分桶后 source 为单一来源)
-  if (selSupplier) list = list.filter(x => (x.source || "") === selSupplier);
-  const keys = list.map(x => x.key);
-  if (!keys.length) return;
-  if (!selModel || !keys.includes(selModel)) selModel = keys[0];
-  const i = keys.indexOf(selModel);
-  selModel = keys[(i + dir + keys.length) % keys.length];
-  render();
+// 与模型列表共用同一排序, 上下键按屏幕显示顺序切换
+// 总量(__total__)是虚拟首项: 向上越过第一个模型回到总量, 总量向下进入第一个模型
+let list = rankSortedStats();
+// 供应商 tab 选中时只在该供应商的模型间切换 (free 模型散落各来源, 不归任一供应商)
+if (selSupplier && mFilter !== "free") list = list.filter(x => (x.source || "") === selSupplier);
+const keys = list.map(x => x.key);
+if (!keys.length) return;
+if (selModel === "__total__") {
+// 总量态: 向下进第一个模型, 向上保持总量(或循环到末尾)
+selModel = dir > 0 ? keys[0] : keys[keys.length - 1];
+render();
+return;
+}
+if (!selModel || !keys.includes(selModel)) selModel = keys[0];
+const i = keys.indexOf(selModel);
+let ni = i + dir;
+if (ni < 0) { selModel = "__total__"; render(); return; } // 向上越过第一个 -> 总量
+selModel = keys[ni % keys.length];
+render();
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Tab") {
