@@ -456,6 +456,7 @@ let selModel = null;
 let selSupplier = "go"; // null = 全部
 let heatRange = "30";    // 热力图范围: 7 | 30 | all
 let timeRange = "today"; // 小屏总量时间范围: today | 7 | all
+let lastHover = null;    // 图表最后悬停坐标 {cx, cy}, 切模型后用于刷新 tooltip
 let mFilter = "all";
 let mUnit = "count";
 
@@ -830,7 +831,10 @@ inner += `<rect x="${(px-2).toFixed(1)}" y="${(py-2).toFixed(1)}" width="4" heig
 svg.innerHTML = inner;
 const total = vals.reduce((a, v) => a + v, 0);
 const maxP = Math.max(...vals);
-title.textContent = `${totalName} · ${rngLabel} ${fmtTokens(total)} · 峰值 ${fmtV(maxP)}`;
+const costTotal = pts.reduce((a, p) => a + (p.cost || 0), 0);
+const costMax = Math.max(...pts.map(p => p.cost || 0), 0);
+const costStr = costTotal > 0 ? ` · $${costTotal.toFixed(2)} · 峰值 $${costMax.toFixed(2)}` : "";
+title.textContent = `${totalName} · ${rngLabel} ${fmtTokens(total)} · 峰值 ${fmtV(maxP)}${costStr}`;
 const chartBox = $("#dChart");
 let tipEl = $("#chartTip");
 if (!tipEl) {
@@ -841,10 +845,10 @@ chartBox.appendChild(tipEl);
 }
 const byDateMap = {};
 pts.forEach(p => { byDateMap[p.date] = p; });
-svg.onmousemove = (e) => {
+const showTip = (cx, cy) => {
 const svgRect = svg.getBoundingClientRect();
 const scaleX = svgRect.width / W;
-const mx = (e.clientX - svgRect.left) / scaleX;
+const mx = (cx - svgRect.left) / scaleX;
 if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
 const di = Math.round((mx - PAD_L) / xSpan * (dates.length - 1));
 const d = dates[Math.max(0, Math.min(dates.length - 1, di))];
@@ -855,15 +859,17 @@ tipEl.innerHTML = `${d}<br><b>${fmtTokens(b.tokens || 0)}</b> tok<br>${(b.count 
 tipEl.style.left = "0px";
 const tipRect = tipEl.getBoundingClientRect();
 const boxRectT = chartBox.getBoundingClientRect();
-const pxT = e.clientX - boxRectT.left;
+const pxT = cx - boxRectT.left;
 // 溢出右缘时翻到鼠标左侧(钳制左边界), 否则右侧跟随
 const lx = (pxT + 14 + tipRect.width > boxRectT.width ? pxT - tipRect.width - 10 : pxT + 14);
 tipEl.style.left = Math.max(2, Math.min(lx, boxRectT.width - tipRect.width - 2)) + "px";
 // 总量模式: top 跟随鼠标 Y, 但钳制在标题区下方进入曲线区域
-const pyT = e.clientY - boxRectT.top;
+const pyT = cy - boxRectT.top;
 tipEl.style.top = Math.max(24, Math.min(pyT + 10, boxRectT.height - tipRect.height - 4)) + "px";
 };
-svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
+svg.onmousemove = (e) => { lastHover = { cx: e.clientX, cy: e.clientY }; showTip(e.clientX, e.clientY); };
+svg.onmouseleave = () => { lastHover = null; if (tipEl) tipEl.style.display = "none"; };
+if (lastHover) showTip(lastHover.cx, lastHover.cy);
 return;
 }
 const selKey = String(selModel);
@@ -906,7 +912,7 @@ state.history.find(h => h.key === selKey);
   }
   if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
   const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
-  if (note) note.textContent = isFree ? `${rngLabel} Token(含缓存)` : `${rngLabel} 费用(USD)`;
+  if (note) note.textContent = isFree ? `${rngLabel} Token(含缓存)` : `${rngLabel} Token(含缓存) · 费用(USD)`;
   const W = 400, H = 180, PAD_L = 42, PAD_B = 18, PAD_T = 10, PAD_R = 12;
   const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out + p.tokens_cache) : p.cost);
   const maxV = Math.max(...vals, isFree ? 1 : 0.0001);
@@ -965,7 +971,13 @@ state.history.find(h => h.key === selKey);
   svg.innerHTML = inner;
   const total = vals.reduce((a, v) => a + v, 0);
   const maxP = Math.max(...vals);
-  title.textContent = `${item.name} · ${rngLabel} ${isFree ? fmtTokens(total) + " tok" : "$" + total.toFixed(2)} · 峰值 ${fmtV(maxP)}`;
+  // 双指标: token 主值 + 金额副值 (free 无金额不显示)
+  const tokTotal = pts.reduce((a, p) => a + (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0), 0);
+  const tokMax = Math.max(...pts.map(p => (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0)), 0);
+  const costTotal = pts.reduce((a, p) => a + (p.cost || 0), 0);
+  const costMax = Math.max(...pts.map(p => p.cost || 0), 0);
+  const costStr = isFree || costTotal <= 0 ? "" : ` · $${costTotal.toFixed(2)} · 峰值 $${costMax.toFixed(2)}`;
+  title.textContent = `${item.name} · ${rngLabel} ${fmtTokens(tokTotal)} tok · 峰值 ${fmtTokens(tokMax)} tok${costStr}`;
 
   // 自定义 hover tooltip：划过任意日期显示当天 Token/次数/费用
   try {
@@ -979,10 +991,10 @@ state.history.find(h => h.key === selKey);
     }
     const byDateMap = {};
     pts.forEach(p => { byDateMap[p.date] = p; });
-    svg.onmousemove = (e) => {
+    const showTip = (cx, cy) => {
       const svgRect = svg.getBoundingClientRect();
       const scaleX = svgRect.width / W;
-      const mx = (e.clientX - svgRect.left) / scaleX;
+      const mx = (cx - svgRect.left) / scaleX;
       if (mx < PAD_L - 4 || mx > W - PAD_R + 4) { tipEl.style.display = "none"; return; }
       const ratio = Math.max(0, Math.min(1, (mx - PAD_L) / xSpan));
       const idx = Math.round(ratio * (dates.length - 1));
@@ -998,18 +1010,20 @@ state.history.find(h => h.key === selKey);
         html += `<div class="ct-empty">无使用</div>`;
       }
       tipEl.innerHTML = html;
-tipEl.style.display = "block";
-const boxRect = chartBox.getBoundingClientRect();
-const px = e.clientX - boxRect.left;
-const ty = e.clientY - boxRect.top + 12;
-// 溢出右缘时翻到鼠标左侧(钳制左边界), 否则右侧跟随
-tipEl.style.left = "0px";
-const tw = tipEl.getBoundingClientRect().width;
-const lx2 = (px + 12 + tw > boxRect.width ? px - tw - 8 : px + 12);
-tipEl.style.left = Math.max(2, Math.min(lx2, boxRect.width - tw - 2)) + "px";
-tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
+      tipEl.style.display = "block";
+      const boxRect = chartBox.getBoundingClientRect();
+      const px = cx - boxRect.left;
+      const ty = cy - boxRect.top + 12;
+      // 溢出右缘时翻到鼠标左侧(钳制左边界), 否则右侧跟随
+      tipEl.style.left = "0px";
+      const tw = tipEl.getBoundingClientRect().width;
+      const lx2 = (px + 12 + tw > boxRect.width ? px - tw - 8 : px + 12);
+      tipEl.style.left = Math.max(2, Math.min(lx2, boxRect.width - tw - 2)) + "px";
+      tipEl.style.top = Math.min(ty, boxRect.height - 96) + "px";
     };
-    svg.onmouseleave = () => { if (tipEl) tipEl.style.display = "none"; };
+    svg.onmousemove = (e) => { lastHover = { cx: e.clientX, cy: e.clientY }; showTip(e.clientX, e.clientY); };
+    svg.onmouseleave = () => { lastHover = null; if (tipEl) tipEl.style.display = "none"; };
+    if (lastHover) showTip(lastHover.cx, lastHover.cy);
   } catch (_) { /* hover tooltip 失败不影响图表 */ }
 }
 
