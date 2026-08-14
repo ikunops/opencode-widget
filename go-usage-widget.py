@@ -10,6 +10,9 @@ import time
 from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 
+# 日期聚合统一用系统本地时区 (数据时间戳为 UTC, 用户在北京时间看"今天"需按本地边界)
+LOCAL_TZ = datetime.now().astimezone().tzinfo
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 INDEX_PATH = os.path.join(APP_DIR, "index.html")
@@ -426,19 +429,19 @@ def read_codex_logs(cursor):
 
 
 def week_bounds(now_ms):
-    d = datetime.fromtimestamp(now_ms / 1000, timezone.utc)
-    start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc) - timedelta(days=d.weekday())
+    d = datetime.fromtimestamp(now_ms / 1000, LOCAL_TZ)
+    start = datetime(d.year, d.month, d.day, tzinfo=LOCAL_TZ) - timedelta(days=d.weekday())
     end = start + timedelta(days=7)
     return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
 
 
 def month_bounds(now_ms, subscribe_ms):
-    a = datetime.fromtimestamp(subscribe_ms / 1000, timezone.utc)
-    now = datetime.fromtimestamp(now_ms / 1000, timezone.utc)
+    a = datetime.fromtimestamp(subscribe_ms / 1000, LOCAL_TZ)
+    now = datetime.fromtimestamp(now_ms / 1000, LOCAL_TZ)
 
     def anchored(y, m):
-        last_day = (datetime(y + 1 if m == 12 else y, 1 if m == 12 else m + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)).day
-        return datetime(y, m, min(a.day, last_day), a.hour, a.minute, a.second, tzinfo=timezone.utc)
+        last_day = (datetime(y + 1 if m == 12 else y, 1 if m == 12 else m + 1, 1, tzinfo=LOCAL_TZ) - timedelta(days=1)).day
+        return datetime(y, m, min(a.day, last_day), a.hour, a.minute, a.second, tzinfo=LOCAL_TZ)
 
     y, m = now.year, now.month
     start = anchored(y, m)
@@ -512,7 +515,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                           "last_ts": None, "prev_ts": None,
                           "days": set()}
         s = stats[key]
-        s["days"].add(datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d"))
+        s["days"].add(datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d"))
         s["count_total"] += 1
         # session 聚类: 同模型相邻请求间隔 > 30min 计为新会话
         if s["last_ts"] is None:
@@ -706,7 +709,7 @@ def model_history(rows, days=14):
     for r in rows:
         if r["ts"] < start:
             continue
-        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+        d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         m = norm_model(r["model"])
         src = r.get("src") or "?"
         # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 不再统一归 go
@@ -755,7 +758,7 @@ def supplier_stats(rows):
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
         cost = r.get("cost") or 0.0
-        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+        d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         for key in (src, "all"):
             if key == "all" and src in SUBSET_SRCS:
                 continue
@@ -786,7 +789,7 @@ def heatmap(rows, days=None):
         if start is not None and r["ts"] < start:
             continue
         src = r.get("src") or "?"
-        d = datetime.fromtimestamp(r["ts"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+        d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         tk = r.get("tokens") or {}
         ti = tk.get("input", 0) or 0
         to = tk.get("output", 0) or 0

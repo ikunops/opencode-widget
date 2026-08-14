@@ -125,8 +125,9 @@
   .s-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .s-sup { font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-model { font-size: 11px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .s-mstats { display: grid; grid-template-columns: auto auto; gap: 1px 12px; font-size: 9.5px; color: var(--dim); margin-top: 2px; }
-  .s-mstats b { color: var(--text); font-weight: 600; margin-left: 3px; }
+.s-mstats { display: grid; grid-template-columns: auto auto; gap: 1px 12px; font-size: 9.5px; color: var(--dim); margin-top: 2px; }
+.s-mstats b { color: var(--text); font-weight: 600; margin-left: 3px; }
+.s-reset { font-size: 9px; color: var(--warn, #f59e0b); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-hint { font-size: 9px; color: var(--faded); letter-spacing: 0.5px; }
   .s-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 10px; color: var(--dim); flex-shrink: 0; }
   .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; background: var(--glass); border: 1px solid var(--border); border-radius: 7px; }
@@ -275,6 +276,7 @@
           <div class="s-sup" id="sSupplier">OpenCode Go</div>
           <div class="s-model" id="sModel">—</div>
           <div class="s-mstats" id="sMStats"></div>
+          <div class="s-reset" id="sReset"></div>
       <div class="s-grid" id="sGrid"></div>
         </div>
       </div>
@@ -453,6 +455,7 @@ let uiState = "mid";   // small | mid | large
 let selModel = null;
 let selSupplier = "go"; // null = 全部
 let heatRange = "30";    // 热力图范围: 7 | 30 | all
+let timeRange = "today"; // 小屏总量时间范围: today | 7 | all
 let mFilter = "all";
 let mUnit = "count";
 
@@ -1046,6 +1049,40 @@ function allAgg() {
   return state.suppliers.all || { tokens: 0, cost: 0, input: 0, output: 0, cache: 0, count: 0, days: 0 };
 }
 
+// 按时间范围聚合小屏总量: today | 7 | all; 从 history 逐日 series 求和 (跟随当前供应商/全部)
+function aggForRange(range) {
+  const isFree = mFilter === "free";
+  const src = isFree ? null : selSupplier;
+  const byDate = {};
+  state.history.forEach(h => {
+    if (isFree) { if (!h.is_free) return; }
+    else if (src) { if (h.source !== src) return; }
+    else if (SUBSET_SRCS.includes(h.source)) return;
+    (h.series || []).forEach(p => {
+      const b = byDate[p.date] || (byDate[p.date] = { cost: 0, tokens: 0, count: 0, days: 1 });
+      b.cost += p.cost || 0;
+      b.tokens += (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
+      b.count += p.count || 0;
+    });
+  });
+  let entries = Object.entries(byDate);
+  if (range !== "all") {
+    const cut = new Date();
+    cut.setUTCHours(0, 0, 0, 0);
+    if (range === "7") cut.setUTCDate(cut.getUTCDate() - 6);
+    const cutoffStr = cut.toISOString().slice(0, 10);
+    entries = entries.filter(([d]) => String(d).length === 10 && d >= cutoffStr);
+  }
+  const agg = { tokens: 0, cost: 0, count: 0, days: 0 };
+  const daySet = new Set();
+  entries.forEach(([d, v]) => { agg.tokens += v.tokens; agg.cost += v.cost; agg.count += v.count; daySet.add(d); });
+  agg.days = daySet.size;
+  return agg;
+}
+
+const TIME_RANGE_ORDER = ["today", "7", "all"];
+const TIME_RANGE_LABEL = { today: "今天", "7": "近7天", all: "全部" };
+
 function renderSmall() {
   const grid = $("#sGrid");
   if (!grid) return;
@@ -1054,8 +1091,9 @@ function renderSmall() {
   const agg = selSupplier ? supAgg(selSupplier) : allAgg();
   const all = allAgg();
   const cur = win(state.mode === "overview" ? "session" : state.mode) || { pct: 0 };
-  $("#sLabel").textContent = state.mode === "overview" ? "总用量" : periodName(state.mode);
-  $("#sAmount").textContent = state.mode === "overview" ? money(all.cost) : Math.round(cur.pct) + "%";
+  $("#sLabel").textContent = state.mode === "overview" ? "总用量 · " + TIME_RANGE_LABEL[timeRange] : periodName(state.mode);
+  const rangeAgg = aggForRange(timeRange);
+  $("#sAmount").textContent = state.mode === "overview" ? money(rangeAgg.cost) : Math.round(cur.pct) + "%";
   $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(agg.cost) + " $ " + agg.count + "次" : "";
   $("#sSupplier").textContent = selSupplier ? supName(selSupplier) : "全部";
 // 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
@@ -1087,12 +1125,24 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
       mstats.innerHTML = "";
     }
   }
+  // 重置滚动信息: 仅 Go 等带 server 配额(window reset)的供应商显示, 位于模型指标与总Token之间
+  const sreset = $("#sReset");
+  if (sreset) {
+    let resetText = "";
+    if (state.mode === "overview" && selSupplier === "go") {
+      const rw = win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly");
+      if (rw && rw.reset) resetText = "⏳ 重置: " + rw.reset + "后";
+    }
+    sreset.textContent = resetText;
+    sreset.style.display = resetText ? "" : "none";
+  }
   const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
+  const gAgg = state.mode === "overview" ? rangeAgg : agg;
   const rows = [
-    ["总Token", fmtTokens(agg.tokens)],
-    ["总费用", money(agg.cost)],
-    ["总次数", (agg.count || 0) + " 次"],
-    ["活跃天数", (agg.days || 0) + " 天"],
+    ["总Token", fmtTokens(gAgg.tokens)],
+    ["总费用", money(gAgg.cost)],
+    ["总次数", (gAgg.count || 0) + " 次"],
+    ["活跃天数", (gAgg.days || 0) + " 天"],
   ];
   grid.innerHTML = rows.map(([a, b]) =>
     `<div class="sg"><span>${a}</span><b>${b}</b></div>`).join("");
@@ -1403,6 +1453,12 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
+  if (e.key === "x" || e.key === "X") {
+    timeRange = TIME_RANGE_ORDER[(TIME_RANGE_ORDER.indexOf(timeRange) + 1) % TIME_RANGE_ORDER.length];
+    saveViewPrefs(); render();
+    e.preventDefault();
+    return;
+  }
   if (uiState === "mid") return;
   if (e.key === "ArrowLeft") { cycleSupplier(-1); e.preventDefault(); }
   else if (e.key === "ArrowRight") { cycleSupplier(1); e.preventDefault(); }
@@ -1411,14 +1467,16 @@ document.addEventListener("keydown", (e) => {
 });
 
 function saveViewPrefs() {
-  try { localStorage.setItem("mFilter", mFilter); localStorage.setItem("mUnit", mUnit); } catch (_) {}
+  try { localStorage.setItem("mFilter", mFilter); localStorage.setItem("mUnit", mUnit); localStorage.setItem("timeRange", timeRange); } catch (_) {}
 }
 function loadViewPrefs() {
   try {
     const f = localStorage.getItem("mFilter");
     const u = localStorage.getItem("mUnit");
+    const tr = localStorage.getItem("timeRange");
     if (f === "go" || f === "free") mFilter = f;
     if (u === "token") mUnit = u;
+    if (tr === "today" || tr === "7" || tr === "all") timeRange = tr;
   } catch (_) {}
 }
 document.querySelectorAll(".m-filters").forEach(f => {
