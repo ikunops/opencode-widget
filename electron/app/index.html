@@ -548,8 +548,14 @@ selModel = (withHist || cands[0] || state.stats[0]).key;
   const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
   const total = (s.used || 0) + (w.used || 0) + (m.used || 0);
   $("#footLeft").textContent = `累计 ${total ? money(total) : "—"} · ${state.rows} 条 · ${ago}s前`;
-  $("#calBadge").textContent = state.server ? "服务端 ✓ " : (lastCal ? "已校准 ✓ " : "");
-  $("#footRight").textContent = (state.server || lastCal) ? "" : "右键菜单";
+  if (state.server) {
+    const cred = state.credits || 0;
+    $("#calBadge").textContent = "服务端 ✓" + (cred > 0 ? ` · +$${(state.credits_dollars || 0).toFixed(0)}信用` : "");
+    $("#footRight").textContent = "官方计量器≠账单(≈1.4×)";
+  } else {
+    $("#calBadge").textContent = lastCal ? "已校准 ✓ " : "";
+    $("#footRight").textContent = lastCal ? "" : "右键菜单";
+  }
   $("#keyText").textContent = state.keyOk ? `Key ✓ ${state.models}` : "Key ✗";
   $("#keyDot").className = "dot " + (state.keyOk ? "ok" : "err");
   } catch (e) { try { document.getElementById("footRight").textContent = "ERR:" + e.message; } catch (_) {} }

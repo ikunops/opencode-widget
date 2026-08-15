@@ -32,7 +32,15 @@ DASH_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 SESSION_MS = 5 * 3600 * 1000
 WEEK_MS = 7 * 24 * 3600 * 1000
+# 基础限额 (官方: $12/5h, $30/周, $60/月)
 LIMITS = {"session": 12.0, "weekly": 30.0, "monthly": 60.0}
+# 每一条已应用的 referral credit 对每个用量窗口限额的扩容额度 (官方证据: +$5 → 月限额 60→70, 周限额 30→40)
+CREDIT_PER_APPLIED = 5.0
+
+
+def limit_for(kind, applied_credits=0):
+    """有效限额 = 基础限额 + 已应用信用额度数 × CREDIT_PER_APPLIED。"""
+    return LIMITS.get(kind, 0.0) + CREDIT_PER_APPLIED * (applied_credits or 0)
 
 PRICES = {
     "grok-4.5":          {"in": 2.00, "out": 6.00, "cr": 0.30, "cw": None},
@@ -452,7 +460,7 @@ def month_bounds(now_ms, subscribe_ms):
     return int(start.timestamp() * 1000), int(anchored(ey, em).timestamp() * 1000)
 
 
-def build_windows(rows, now_ms):
+def build_windows(rows, now_ms, applied_credits=0):
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
     paid = [(t, c) for t, c in costs if c]
     earliest = min((t for t, _ in paid), default=now_ms)
@@ -473,9 +481,9 @@ def build_windows(rows, now_ms):
         return {"kind": kind, "used": used, "limit": limit, "pct": pct, "reset": reset_ms}
 
     return [
-        mk("session", s_used, LIMITS["session"], s_reset),
-        mk("weekly", w_used, LIMITS["weekly"], we),
-        mk("monthly", m_used, LIMITS["monthly"], me),
+        mk("session", s_used, limit_for("session", applied_credits), s_reset),
+        mk("weekly", w_used, limit_for("weekly", applied_credits), we),
+        mk("monthly", m_used, limit_for("monthly", applied_credits), me),
     ]
 
 
@@ -847,5 +855,14 @@ def scrape_server_usage(auth_cookie, workspace_id, timeout=12):
     if not windows:
         return {"ok": False, "error": "未能解析用量窗口"}
     windows.sort(key=lambda w: {"session": 0, "weekly": 1, "monthly": 2}.get(w["kind"], 9))
-    return {"ok": True, "windows": windows, "workspace_id": workspace_id}
+
+    # 解析已应用 referral credit: 页面 SSR 序列化 rewards 数组含 status/amount
+    applied_credits = 0
+    applied_dollars = 0.0
+    for st, am in re.findall(r'status:"([^"]+)",email:"[^"]*",amount:(\d+)', html):
+        if st == "applied":
+            applied_credits += 1
+            applied_dollars += int(am) / 100.0
+    return {"ok": True, "windows": windows, "workspace_id": workspace_id,
+            "applied_credits": applied_credits, "applied_dollars": applied_dollars}
 

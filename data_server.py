@@ -25,12 +25,18 @@ try:
 except Exception:
     sd = None
 
+try:
+    import usage_remote as ur
+except Exception:
+    ur = None
+
 PORT = 8765
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
 
 
 def build_state():
     now_ms = int(time.time() * 1000)
+    applied_credits = _applied_credits()
     try:
         rows, _ = _collect_rows()
     except Exception:
@@ -48,9 +54,9 @@ def build_state():
         models = 0
         all_go_models = []
 
-    windows = gw.build_windows(rows, now_ms)
+    windows = gw.build_windows(rows, now_ms, applied_credits=applied_credits)
     _apply_calibration(windows)
-    _apply_server_quota(windows)
+    _apply_server_quota(windows, applied_credits)
     stats = gw.model_stats(rows, now_ms, None, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
@@ -76,6 +82,8 @@ def build_state():
         "models": models,
         "calibration": cal if cal else None,
         "server": srv,
+        "credits": applied_credits,
+        "credits_dollars": round(applied_credits * gw.CREDIT_PER_APPLIED, 2),
         "server_error": None,
         "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
         "ts": now_ms,
@@ -93,6 +101,16 @@ def _effective_key():
     return gw.discover_go_key() or ""
 
 
+def _applied_credits():
+    """已应用的 referral credit 数：优先 usage_remote.db sync_meta，fallback 0。"""
+    if ur is not None:
+        try:
+            return ur.read_remote_credits()
+        except Exception:
+            return 0
+    return 0
+
+
 def _apply_calibration(windows):
     try:
         cfg = gw.load_config()
@@ -103,7 +121,7 @@ def _apply_calibration(windows):
         pct = cal.get(key)
         if not pct or pct <= 0:
             continue
-        limit = gw.LIMITS.get(key)
+        limit = gw.limit_for(key)
         if not limit:
             continue
         target = limit * pct / 100.0
@@ -114,8 +132,13 @@ def _apply_calibration(windows):
 
 
 def _latest_server_quota():
-    """从 quota_snapshot 读最新一次抓取的滚动窗口百分比（官网实时值）。"""
-    db = (sd.DB_PATH if sd else os.path.join(APP_DIR, "server_usage.db"))
+    """从 quota_snapshot 读最新一次抓取的滚动窗口百分比（官网实时值）。
+    优先读 usage_remote.db，fallback 到 server_usage.db。"""
+    db = None
+    if ur is not None:
+        db = ur.REMOTE_DB
+    if not db or not os.path.exists(db):
+        db = (sd.DB_PATH if sd else os.path.join(APP_DIR, "server_usage.db"))
     if not os.path.exists(db):
         return []
     try:
@@ -124,6 +147,7 @@ def _latest_server_quota():
             SELECT kind, label, pct, reset_text
             FROM quota_snapshot
             WHERE fetched_at = (SELECT MAX(fetched_at) FROM quota_snapshot)
+            ORDER BY CASE kind WHEN 'session' THEN 0 WHEN 'weekly' THEN 1 ELSE 2 END
         """).fetchall()
         conn.close()
         return [{"kind": r[0], "label": r[1], "pct": r[2], "reset_text": r[3]} for r in rows]
@@ -131,8 +155,9 @@ def _latest_server_quota():
         return []
 
 
-def _apply_server_quota(windows):
-    """用官网 quota 覆盖本地计算的百分比（订阅滚动窗口 vs 本地估算）。"""
+def _apply_server_quota(windows, applied_credits=0):
+    """用官网 quota 覆盖本地计算的百分比（订阅滚动窗口 vs 本地估算）。
+    限额按基础 + 已应用 credit 扩容，used 反推为官方计量器值。"""
     srv = _latest_server_quota()
     if not srv:
         return
@@ -141,13 +166,33 @@ def _apply_server_quota(windows):
         sw = srv_map.get(w["kind"])
         if not sw:
             continue
+        limit = gw.limit_for(w["kind"], applied_credits)
         w["pct"] = sw["pct"]
-        w["used"] = gw.LIMITS[w["kind"]] * sw["pct"] / 100.0
+        w["limit"] = limit
+        w["used"] = limit * sw["pct"] / 100.0
         w["reset"] = sw["reset_text"]
         w["calibrated"] = True
 
 
 def _collect_rows():
+    remote_rows = []
+    cost_map = {}
+    if ur is not None:
+        try:
+            remote_rows = ur.read_remote_rows()
+            cost_map = ur.read_remote_cost_map()
+        except Exception:
+            remote_rows = []
+            cost_map = {}
+    if remote_rows:
+        srv_models = {r["model"] for r in remote_rows}
+        latest_fetched = ur.read_remote_latest_fetched_at() if ur is not None else 0
+        local_rows = gw.read_opencode_all()
+        extra = [r for r in local_rows
+                 if r["model"] not in srv_models or r["ts"] > latest_fetched
+                 or r.get("src") not in ("go", "zen")]
+        return remote_rows + extra, cost_map
+
     srv_rows = []
     if sd is not None:
         try:
@@ -164,15 +209,11 @@ def _collect_rows():
         srv_models = {r["model"] for r in srv_rows}
         latest_fetched = sd.read_latest_fetched_at() if sd is not None else 0
         local_rows = gw.read_opencode_all()
-        # server 是权威源，但可能滞后：本地记录要么是 server 里没有的模型，
-        # 要么时间晚于 server 最近一次抓取（本地 opencode.db 实时，server 是定时抓取）。
-        # 非 go/zen 来源（gateway/kilo/router 等动态供应商）server 不覆盖，必须保留。
         extra = [r for r in local_rows
                  if r["model"] not in srv_models or r["ts"] > latest_fetched
                  or r.get("src") not in ("go", "zen")]
         return srv_rows + extra, cost_map
     go_rows = gw.read_opencode_all()
-    # codex 日志增量读取（记住上次 id，避免每次全量）
     try:
         cfg = gw.load_config()
         last_id = cfg.get("codex_log_id") or 0
@@ -205,15 +246,18 @@ def do_sync():
         return {"ok": False, "error": f"抓取失败: {e}"}
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error", "抓取失败")}
-    if sd is not None:
+    if ur is not None:
         try:
-            sd.sync_all(cookie, ws, windows=res.get("windows"), max_pages=130)
+            r = ur.full_sync(cookie, ws, windows=res.get("windows"),
+                             applied_credits=res.get("applied_credits"))
         except Exception as e:
             return {"ok": False, "error": f"落库失败: {e}"}
+    else:
+        r = {"ok": True}
     with CACHE["lock"]:
         CACHE["state"] = None
         CACHE["ts"] = 0
-    return {"ok": True, "windows": res.get("windows")}
+    return {"ok": True, "windows": res.get("windows"), "remote": r}
 
 
 def _config_json():
