@@ -19,6 +19,8 @@ OpenCode / Codex / Go 用量悬浮窗 —— 透明玻璃面板，实时显示 O
 - **大屏仪表盘**：GitHub 风格热力图、统计卡片（跟随时间范围）、输入/输出/缓存拆分
 - **按来源计价**：同一模型（如 hy3）在不同供应商下的免费/付费状态独立判定，与官方一致
 - **官方数据同步**：应用内登录 opencode.ai 自动抓取 Cookie 与 workspace，同步官方配额数值
+- **云端公式主动同步**：每 15 分钟自动拉取云端公式规则（计量系数/供应商/视图定义），版本变化即时生效，失败保留上一版
+- **官方计量口径**：总用量按官方系数（1.4212）折算，与 opencode.ai 账单一致；明细/曲线保持原始账单
 - **快捷键**：`Tab` 切换供应商 · `←/→` 切换供应商 · `↑/↓` 切换模型
 - **边缘 tooltip**：历史曲线悬停详情在图表右缘自动翻转到左侧，不被裁剪
 
@@ -34,7 +36,7 @@ OpenCode / Codex / Go 用量悬浮窗 —— 透明玻璃面板，实时显示 O
 └─────────────────────┘
 ```
 
-- **Python 只负责取数与计算**（`data_server.py` + `go-usage-widget.py` 数据函数 + `server_data.py` 官方同步）
+- **Python 只负责取数与计算**（`data_server.py` + `go-usage-widget.py` 数据函数 + `server_data.py` 官方同步 + `views.py` 云端公式引擎）
 - **前端与窗口交互交给 Electron**（`electron/main.js` / `preload.js` / `app/index.html`）
 - **无痕启动**：直接拉起 GUI 进程（`pythonw.exe` + `electron.exe`），不经过 cmd/npm，双击不闪黑框
 
@@ -117,6 +119,13 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 - 本地 `~/.local/share/opencode/opencode.db`（OpenCode 会话用量）+ `~/.codex/logs_2.sqlite`
 - 官方 opencode.ai Go 配额（配置 auth cookie 后经 `POST /api/sync` 同步）
 - 本地 `server_usage.db` 是官方数据的账本镜像（自动同步，与仓库数据独立）
+- 云端公式（计量系数 / 供应商 / 视图定义）从 Cloudflare Worker URL 拉取，每 15 分钟自动同步；本地 `views.py` 提供默认公式兜底
+
+## 计量口径说明
+
+- **总用量 / 小屏主金额** 显示官方口径：账单成本 × 官方计量系数（当前 1.4212，由云端公式 `params.meter.ratio` 定义，云端可变），与 opencode.ai 账单（封顶配额）一致
+- **模型明细 / 每日曲线 / tooltip** 保持原始账单成本，避免明细虚高
+- 切换时间范围（今天/近7天/全部）与供应商时，主金额随之联动，均为官方口径
 
 ## 目录结构
 
@@ -124,6 +133,7 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 data_server.py            # 数据服务（HTTP/预热/缓存/API）
 go-usage-widget.py        # 数据计算函数（用量/统计/历史/热力图/来源计价）
 server_data.py            # 官方用量抓取与落库
+views.py                  # 云端公式引擎（拉取/缓存/回退 + 视图聚合与计量系数）
 browser_cookie.py         # 浏览器 Cookie 获取辅助
 启动Go用量悬浮窗.cmd      # 兼容启动入口（会闪一次黑框）
 启动Go用量悬浮窗.vbs      # 无痕启动入口（推荐）
