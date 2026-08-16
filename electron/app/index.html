@@ -232,6 +232,7 @@
   .btn-ghost { background: rgba(255,255,255,0.06); color: var(--text); }
   .m-msg { font-size: 11px; color: var(--green); margin-top: 8px; min-height: 15px; }
   .k-input { width: 100%; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; padding: 9px 12px; outline: none; margin-bottom: 10px; font-family: Consolas, monospace; }
+  button:focus { outline: none; }
 </style>
 </head>
 <body>
@@ -1143,9 +1144,11 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
   const sreset = $("#sReset");
   if (sreset) {
     let resetText = "";
-    if (state.mode === "overview" && selSupplier === "go") {
-      const rw = win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly");
-      if (rw && rw.reset) resetText = "⏳ 重置: " + rw.reset + "后";
+    if (selSupplier === "go") {
+      const rw = state.mode === "overview"
+        ? win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly")
+        : win(state.mode);
+      if (rw && rw.reset) resetText = "⏳ 重置: " + countdown(rw.reset - Date.now()) + "后";
     }
     sreset.textContent = resetText;
     sreset.style.display = resetText ? "" : "none";
@@ -1350,6 +1353,9 @@ async function initOpacity() {
   } catch (_) { setTimeout(initOpacity, 500); }
 }
 document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.closest && e.target.closest("button")) e.target.closest("button").blur();
+  });
   const sl = document.getElementById("opSlider");
     if (sl) sl.addEventListener("input", () => {
       const v = Number(sl.value) / 100;
