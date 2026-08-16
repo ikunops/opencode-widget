@@ -217,12 +217,14 @@ class FormulaStore:
                               "fetched_at": int(time.time() * 1000)}
                 return True
             except Exception as e:
-                self._meta = {"source": "default", "url": self.url,
+                self._meta = {"source": "cloud" if self._formula is not None else "default",
+                              "url": self.url,
                               "error": str(e), "fetched_at": self._meta.get("fetched_at", 0)}
         else:
             self._meta = {"source": "default", "url": "", "error": None,
                           "fetched_at": 0}
-        self._formula = DEFAULT_FORMULA
+        if self._formula is None:
+            self._formula = DEFAULT_FORMULA
         return False
 
     def get(self, force=False):
@@ -314,14 +316,21 @@ class ViewEngine:
         # <scope>_<range|daily>
         if vid.endswith("_daily"):
             head = vid[: -len("_daily")]
-            return {"id": vid, "label": head, "scope": self._scope_from(head),
-                    "range": "all", "group": "day", "agg": [], "post": []}
+            scope = self._scope_from(head)
+            return {"id": vid, "label": head, "scope": scope,
+                    "range": "all", "group": "day", "agg": [], "post": self._post_for(scope)}
         if "_" in vid:
             head, tail = vid.rsplit("_", 1)
             if tail in _RANGES:
-                return {"id": vid, "label": head, "scope": self._scope_from(head),
-                        "range": tail, "group": None, "agg": [], "post": []}
+                scope = self._scope_from(head)
+                return {"id": vid, "label": head, "scope": scope,
+                        "range": tail, "group": None, "agg": [], "post": self._post_for(scope)}
         return None
+
+    def _post_for(self, scope):
+        if scope.get("all") or scope.get("source") in self.paid:
+            return [{"op": "meterRatio", "on": "cost"}]
+        return []
 
     def _scope_from(self, head):
         if head == "all":

@@ -1157,6 +1157,8 @@ function aggForRange(range) {
 
 const TIME_RANGE_ORDER = ["today", "7", "all"];
 const TIME_RANGE_LABEL = { today: "今天", "7": "近7天", all: "全部" };
+const VIEW_RANGE = { today: "today", "7": "7d", "30": "30d", all: "all" };
+const viewIdFor = (src, range) => `${src || "all"}_${VIEW_RANGE[range] || range}`;
 
 // 大屏: 具体模型 + 时间范围 (heatRange: 1|7|30|all) 的聚合, 供统计卡/热力图跟随模型选择
 function modelAggForRange(key, range) {
@@ -1206,9 +1208,9 @@ function renderSmall() {
   const list = activeSuppliers();
   if (selSupplier && !list.includes(selSupplier)) selSupplier = list[0];
   const src = selSupplier || "all";
-  const vRange = state._viewCache && state._viewCache[`${src}_${timeRange}`];
-  const vAll = state._viewCache && state._viewCache[`${src}_all`];
-  const vAllAll = state._viewCache && state._viewCache[`all_all`];
+  const vRange = state._viewCache && state._viewCache[viewIdFor(src, timeRange)];
+  const vAll = state._viewCache && state._viewCache[viewIdFor(src, "all")];
+  const vAllAll = state._viewCache && state._viewCache["all_all"];
   const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
   const all = vAllAll ? vAllAll.totals : allAgg();
   const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
@@ -1422,7 +1424,7 @@ async function refresh() {
     await loadFormula(false);
     state._viewCache = {};
     const src0 = selSupplier || "all";
-    const needed = new Set([`${src0}_${timeRange}`, `${src0}_all`, `all_all`, `all_${heatRange}`, `all_daily`]);
+    const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all", viewIdFor("all", heatRange), "all_daily"]);
     if (selModel && selModel !== "__total__") {
       needed.add(`model_${selModel}_${heatRange}`);
       needed.add(`model_${selModel}_daily`);

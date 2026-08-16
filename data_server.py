@@ -114,6 +114,29 @@ def get_formula(force=False):
     return f
 
 
+FORMULA_SYNC_INTERVAL_S = 900
+
+
+_FORMULA_LAST_VERSION = None
+
+
+def formula_sync_loop():
+    """后台主动同步云端公式: 周期性拉取云端, 检测版本变化并应用到本地。
+    与 auto_sync_loop 不同, 这里同步的是公式规则而非 server_usage.db。
+    失败静默保留上一版已生效公式, 等下一轮重试。"""
+    global _FORMULA_LAST_VERSION
+    while True:
+        try:
+            f = get_formula(force=True)
+            ver = f.get("version")
+            if ver != _FORMULA_LAST_VERSION:
+                print(f"[formula-sync] version {_FORMULA_LAST_VERSION} -> {ver} (source={_FORMULA_STORE.meta().get('source')})")
+                _FORMULA_LAST_VERSION = ver
+        except Exception:
+            pass
+        time.sleep(FORMULA_SYNC_INTERVAL_S)
+
+
 def run_view(vid, rows):
     get_formula()
     with _FORMULA_LOCK:
@@ -575,6 +598,7 @@ def auto_sync_loop():
 def main():
     threading.Thread(target=preheat, daemon=True).start()
     threading.Thread(target=auto_sync_loop, daemon=True).start()
+    threading.Thread(target=formula_sync_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"[data-server] listening on http://127.0.0.1:{PORT}/api/state")
     srv.serve_forever()
