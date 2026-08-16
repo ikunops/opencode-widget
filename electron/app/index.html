@@ -1247,7 +1247,7 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
   if (mstats) {
     if (curModel) {
       const mTok = (curModel.tokens_in || 0) + (curModel.tokens_out || 0) + (curModel.tokens_cache || 0);
-      const mCost = curModel.cost_total || 0;
+      const mCost = (curModel.cost_total || 0) * meterRatio(src === "all" ? null : src);
       const hit = (curModel.cache_hit || 0).toFixed(1) + "%";
       const sess = (curModel.sessions || 0) + " 个";
       mstats.innerHTML =
@@ -1363,7 +1363,7 @@ render();
   if (row) {
     const cards = [
       ["总Token", fmtTokens(agg.tokens)],
-      ["总费用", money(agg.cost * (isModelSel ? 1 : meterRatio(src === "all" ? null : src)))],
+      ["总费用", money(agg.cost * meterRatio(src === "all" ? null : src))],
       ["请求数", (agg.count || 0) + " 次"],
       ["输入", fmtTokens(agg.input)],
       ["输出", fmtTokens(agg.output)],
@@ -1411,7 +1411,7 @@ render();
       if (!date) { h += `<div class="heat-cell" style="background:transparent"></div>`; continue; }
       const v = byDate[date];
       const col = v ? heatColor(v.tokens, maxV) : HEAT_COLORS[0];
-      const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${v.cost.toFixed(4)}` : date + " · 无使用";
+      const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${(v.cost * meterRatio(src === "all" ? null : src)).toFixed(4)}` : date + " · 无使用";
       h += `<div class="heat-cell" title="${tip}" style="background:${col}"></div>`;
     }
     h += `</div>`;
