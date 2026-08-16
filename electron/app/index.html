@@ -709,7 +709,7 @@ function fillModelList(el, key) {
       const pct = totalCnt > 0 ? Math.min(100, usedCnt / totalCnt * 100) : 0;
       main = usedCnt + "次";
       barPct = pct;
-      extra = `${fmtCost(c)}/${fmtCost(quotaLimit)}`;
+      extra = `${fmtCost(c * meterRatio(x.source))}/${fmtCost(quotaLimit)}`;
       if (remainAll > 0 && remainCnt > 0) rem = `<span class="rem">剩${Math.round(remainCnt)}次</span>`;
     } else if (x.group === "go") {
       // go token 模式: 已使用 · 百分比 · 该模型总量(已用 + 剩余共享费用按本模型均价折算)
@@ -950,7 +950,7 @@ state.history.find(h => h.key === selKey);
     const tot = (s.tokens_in || 0) + (s.tokens_out || 0) + (s.tokens_cache || 0);
     const cells = [
       ["总Token", fmtTokens(tot)],
-      ["费用", money(s.cost_total || 0)],
+      ["费用", money((s.cost_total || 0) * meterRatio(s.source))],
       ["输入", fmtTokens(s.tokens_in || 0)],
       ["输出", fmtTokens(s.tokens_out || 0)],
       ["缓存", fmtTokens(s.tokens_cache || 0)],
@@ -1045,7 +1045,7 @@ state.history.find(h => h.key === selKey);
   const tokMax = Math.max(...pts.map(p => (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0)), 0);
   const costTotal = pts.reduce((a, p) => a + (p.cost || 0), 0);
   const costMax = Math.max(...pts.map(p => p.cost || 0), 0);
-  const costStr = isFree || costTotal <= 0 ? "" : ` · $${costTotal.toFixed(2)} · 峰值 $${costMax.toFixed(2)}`;
+  const costStr = isFree || costTotal <= 0 ? "" : ` · $${(costTotal * meterRatio(item.source)).toFixed(2)} · 峰值 $${(costMax * meterRatio(item.source)).toFixed(2)}`;
   title.textContent = `${item.name} · ${rngLabel} ${fmtTokens(tokTotal)} tok · 峰值 ${fmtTokens(tokMax)} tok${costStr}`;
 
   // 自定义 hover tooltip：划过任意日期显示当天 Token/次数/费用
@@ -1074,7 +1074,7 @@ state.history.find(h => h.key === selKey);
         const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
         html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
         html += `<div class="ct-row"><span>次数</span><b>${p.count || 0}</b></div>`;
-        html += `<div class="ct-row"><span>费用</span><b>${money(p.cost || 0)}</b></div>`;
+        html += `<div class="ct-row"><span>费用</span><b>${money((p.cost || 0) * meterRatio(item.source))}</b></div>`;
       } else {
         html += `<div class="ct-empty">无使用</div>`;
       }
