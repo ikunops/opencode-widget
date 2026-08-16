@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   saveUiState: (s) => ipcRenderer.invoke('save-ui-state', s),
   onSnapSmall: (cb) => ipcRenderer.on('snap-small', () => cb()),
   onSnapRestore: (cb) => ipcRenderer.on('snap-restore', (_e, s) => cb(s)),
+  setClickThrough: (enabled, headerH) => ipcRenderer.invoke('set-click-through', enabled, headerH),
+  exitSnap: () => ipcRenderer.invoke('exit-snap'),
   quit: () => ipcRenderer.invoke('quit'),
 });

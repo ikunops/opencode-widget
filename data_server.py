@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import importlib.util
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,12 +31,102 @@ try:
 except Exception:
     ur = None
 
+import views as vw
+
 PORT = 8765
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
+
+_FORMULA_STORE = vw.FormulaStore(url="")
+_FORMULA_ENGINE = None
+_FORMULA_LOCK = threading.Lock()
+
+
+def _formula_url():
+    try:
+        cfg = gw.load_config()
+        return (cfg.get("formula_url") or "").strip()
+    except Exception:
+        return ""
+
+
+def apply_params_to_gw(formula):
+    """把云端公式 params 覆盖到 gw 模块级规则表, 使本地行为随云端公式变化。
+    缺 key 保持本地默认, 保证降级一致。"""
+    if not isinstance(formula, dict):
+        return
+    p = formula.get("params") or {}
+    if not isinstance(p, dict):
+        return
+    limits = p.get("limits") or {}
+    if isinstance(limits, dict):
+        if limits.get("session"):
+            gw.LIMITS["session"] = float(limits["session"])
+        if limits.get("weekly"):
+            gw.LIMITS["weekly"] = float(limits["weekly"])
+        if limits.get("monthly"):
+            gw.LIMITS["monthly"] = float(limits["monthly"])
+        if limits.get("credit_per_applied"):
+            gw.CREDIT_PER_APPLIED = float(limits["credit_per_applied"])
+    windows = p.get("windows") or {}
+    if isinstance(windows, dict):
+        if windows.get("session_ms"):
+            gw.SESSION_MS = int(windows["session_ms"])
+        if windows.get("week_ms"):
+            gw.WEEK_MS = int(windows["week_ms"])
+    providers = p.get("providers") or {}
+    if isinstance(providers, dict):
+        if isinstance(providers.get("src"), dict):
+            gw.PROVIDER_SRC = dict(providers["src"])
+        if isinstance(providers.get("prefixes"), list):
+            gw.PROVIDER_PREFIXES |= set(providers["prefixes"])
+        if isinstance(providers.get("aliases"), dict):
+            gw.MODEL_ALIASES = dict(providers["aliases"])
+    free = p.get("free_models") or {}
+    if isinstance(free, dict):
+        if isinstance(free.get("whitelist"), list):
+            gw.FREE_WHITELIST = set(free["whitelist"])
+        if isinstance(free.get("suffixes"), list):
+            gw.FREE_SUFFIXES = tuple(free["suffixes"])
+        if isinstance(free.get("exclude"), list):
+            gw.FREE_EXCLUDE = set(free["exclude"])
+    if isinstance(p.get("prices"), dict):
+        gw.PRICES = dict(p["prices"])
+    if isinstance(p.get("req_limits"), dict):
+        gw.REQ_LIMITS = dict(p["req_limits"])
+    if isinstance(p.get("tokens_per_req"), dict):
+        gw.TOKENS_PER_REQ = dict(p["tokens_per_req"])
+    if isinstance(p.get("display_names"), dict):
+        gw.DISPLAY_NAMES = dict(p["display_names"])
+
+
+def get_formula(force=False):
+    """返回当前公式 (云端/默认), 并同步重建引擎 + 覆盖本地规则表。"""
+    global _FORMULA_STORE, _FORMULA_ENGINE
+    url = _formula_url()
+    if _FORMULA_STORE.url != url:
+        _FORMULA_STORE = vw.FormulaStore(url=url)
+    f = _FORMULA_STORE.get(force=force)
+    apply_params_to_gw(f)
+    with _FORMULA_LOCK:
+        _FORMULA_ENGINE = vw.ViewEngine(f, norm=gw.norm_model,
+                                        is_free=gw.is_free_model,
+                                        local_tz=gw.LOCAL_TZ)
+    return f
+
+
+def run_view(vid, rows):
+    get_formula()
+    with _FORMULA_LOCK:
+        engine = _FORMULA_ENGINE
+    return engine.execute(vid, rows)
 
 
 def build_state():
     now_ms = int(time.time() * 1000)
+    try:
+        get_formula()
+    except Exception:
+        pass
     applied_credits = _applied_credits()
     try:
         rows, _ = _collect_rows()
@@ -156,20 +247,23 @@ def _latest_server_quota():
 
 
 def _apply_server_quota(windows, applied_credits=0):
-    """用官网 quota 覆盖本地计算的百分比（订阅滚动窗口 vs 本地估算）。
-    限额按基础 + 已应用 credit 扩容，used 反推为官方计量器值。"""
+    """用官网 quota 覆盖本地百分比。官网 pct 已含信用扩容, 直接反推 used 并同步 limit/pct。"""
     srv = _latest_server_quota()
     if not srv:
         return
     srv_map = {w["kind"]: w for w in srv}
+    credit = applied_credits * gw.CREDIT_PER_APPLIED
     for w in windows:
         sw = srv_map.get(w["kind"])
         if not sw:
             continue
-        limit = gw.limit_for(w["kind"], applied_credits)
-        w["pct"] = sw["pct"]
+        base = gw.limit_for(w["kind"])          # 基础限额 12/30/60
+        limit = base + credit                    # 扩容后限额
+        used = limit * sw["pct"] / 100.0        # 官网 pct 反推用量（已含信用口径）
+        pct = sw["pct"]                          # 直接采用官网 pct
+        w["used"] = used
         w["limit"] = limit
-        w["used"] = limit * sw["pct"] / 100.0
+        w["pct"] = pct
         w["reset"] = sw["reset_text"]
         w["calibrated"] = True
 
@@ -362,6 +456,36 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/config":
             _send_json(self, _config_json())
+        elif path == "/api/formula":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            force = "refresh" in q or "force" in q
+            f = get_formula(force=force)
+            meta = _FORMULA_STORE.meta()
+            _send_json(self, {
+                "version": f.get("version"),
+                "source": meta["source"],
+                "url": meta["url"],
+                "error": meta["error"],
+                "fetched_at": meta["fetched_at"],
+                "params": f.get("params"),
+                "views": f.get("views"),
+            })
+        elif path == "/api/views":
+            f = get_formula()
+            _send_json(self, {
+                "version": f.get("version"),
+                "views": [{k: v.get(k) for k in ("id", "label", "scope", "range", "group")}
+                          for v in (f.get("views") or [])],
+            })
+        elif path.startswith("/api/view/"):
+            vid = urllib.parse.unquote(path[len("/api/view/"):])
+            try:
+                rows, _ = _collect_rows()
+                _send_json(self, run_view(vid, rows))
+            except vw.FormulaError as e:
+                _send_json(self, {"ok": False, "error": str(e)}, 404)
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
         elif path == "/api/health":
             body = b"ok"
             self.send_response(200)
@@ -425,6 +549,10 @@ def preheat():
         with CACHE["lock"]:
             CACHE["state"] = build_state()
             CACHE["ts"] = time.time()
+    except Exception:
+        pass
+    try:
+        get_formula()
     except Exception:
         pass
 

@@ -396,7 +396,10 @@ def sync_quota_snapshot(conn, windows, workspace_id):
         return 0
     fetched_at = _now_ms()
     n = 0
+    monthly_pct = None
     for w in windows:
+        if w.get("kind") == "monthly":
+            monthly_pct = w.get("pct")
         try:
             conn.execute(
                 "INSERT INTO quota_snapshot (fetched_at, kind, label, pct, reset_text, workspace_id) "
@@ -405,6 +408,16 @@ def sync_quota_snapshot(conn, windows, workspace_id):
             n += 1
         except Exception:
             pass
+    # 订阅锚点（月口径按订阅事件推）：观测到"月度重置"（pct 从接近满回到低位）时记录。
+    # monthly_anchor_ts 锁定首次重置时刻，供以后修正比例用；不影响界面展示。
+    if monthly_pct is not None:
+        prev = conn.execute(
+            "SELECT pct FROM quota_snapshot WHERE kind='monthly' AND fetched_at < ? "
+            "ORDER BY fetched_at DESC LIMIT 1", (fetched_at,)).fetchone()
+        if prev and prev[0] >= 90 and monthly_pct <= 40:
+            set_sync_meta(conn, "monthly_last_reset", fetched_at)
+            if get_sync_meta(conn, "monthly_anchor_ts") is None:
+                set_sync_meta(conn, "monthly_anchor_ts", fetched_at)
     conn.commit()
     return n
 

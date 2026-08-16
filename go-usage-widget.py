@@ -476,14 +476,15 @@ def build_windows(rows, now_ms, applied_credits=0):
     s_oldest = min((t for t, c in costs if session_start <= t < now_ms), default=now_ms)
     s_reset = s_oldest + SESSION_MS if s_oldest > session_start else now_ms + SESSION_MS
 
-    def mk(kind, used, limit, reset_ms):
+    def mk(kind, used, reset_ms):
+        limit = limit_for(kind, applied_credits)
         pct = min(100.0, used / limit * 100) if limit else 0.0
         return {"kind": kind, "used": used, "limit": limit, "pct": pct, "reset": reset_ms}
 
     return [
-        mk("session", s_used, limit_for("session", applied_credits), s_reset),
-        mk("weekly", w_used, limit_for("weekly", applied_credits), we),
-        mk("monthly", m_used, limit_for("monthly", applied_credits), me),
+        mk("session", s_used, s_reset),
+        mk("weekly", w_used, we),
+        mk("monthly", m_used, me),
     ]
 
 
