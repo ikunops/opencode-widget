@@ -420,11 +420,18 @@
 const $ = (s) => document.querySelector(s);
 const money = (v) => v == null ? "—" : (v >= 1 ? "$" + v.toFixed(2) : (v >= 0.01 ? "$" + v.toFixed(3) : "$" + v.toFixed(4)));
 const countdown = (ms) => {
-  if (ms <= 0) return "即将重置";
+  if (ms <= 0) return "已重置";
   const s = Math.floor(ms / 1000);
   if (s >= 86400) { const d = Math.floor(s/86400), h = Math.floor(s%86400/3600); return d + "天" + h + "时"; }
   const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
   return h + "时" + m + "分";
+};
+const resetLabel = (r) => {
+  if (!r) return "";
+  if (typeof r.reset === "number") return "⏳ 重置: " + countdown(r.reset - Date.now()) + " 后";
+  if (r.reset_text) return "⏳ 重置: " + r.reset_text + " 后";
+  if (typeof r === "number") return "⏳ 重置: " + countdown(r - Date.now()) + " 后";
+  return "";
 };
 const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];
 const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
@@ -569,7 +576,7 @@ function render() {
     const cur = win(state.mode);
     cl.textContent = periodName(state.mode);
     ca.textContent = Math.round(cur.pct) + "%";
-    const resetPart = cur.reset_text || (cur.reset ? "重置 " + countdown(cur.reset - Date.now()) : "");
+    const resetPart = cur.reset_text || (typeof cur.reset === "number" && cur.reset ? "重置 " + countdown(cur.reset - Date.now()) : "");
     cs.textContent = (cur.used != null ? money(cur.used) + "/" + money(cur.limit) : "") + (resetPart ? " · " + resetPart : "");
   }
   fitAmount();
@@ -610,7 +617,7 @@ function renderSide() {
     if (!w) return;
     const div = document.createElement("div");
     div.className = "c-item" + (state.mode === k ? " active" : "");
-    const resetPart = w.reset_text || (w.reset ? countdown(w.reset - Date.now()) : "");
+    const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
     div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${resetPart}</span>`;
     div.onclick = () => { state.mode = k; render(); };
     side.appendChild(div);
@@ -619,7 +626,7 @@ function renderSide() {
   if (rw && (rw.reset_text || rw.reset)) {
     const resetDiv = document.createElement("div");
     resetDiv.className = "c-reset";
-    resetDiv.innerHTML = '<span class="c-reset-dot"></span>' + (rw.reset_text || countdown(rw.reset - Date.now()));
+    resetDiv.innerHTML = '<span class="c-reset-dot"></span>' + (rw.reset_text || (typeof rw.reset === "number" && rw.reset ? countdown(rw.reset - Date.now()) : ""));
     side.appendChild(resetDiv);
   }
 }
@@ -776,7 +783,7 @@ function renderLimits() {
     if (!w) return;
     const div = document.createElement("div");
     div.className = "l-card" + (state.mode === k ? " active" : "");
-    const resetPart = w.reset_text || (w.reset ? countdown(w.reset - Date.now()) : "");
+    const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
     div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
     div.onclick = () => { state.mode = k; render(); };
     dl.appendChild(div);
@@ -1258,7 +1265,7 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
       const rw = state.mode === "overview"
         ? win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly")
         : win(state.mode);
-      if (rw && rw.reset) resetText = "⏳ 重置: " + countdown(rw.reset - Date.now()) + "";
+      if (rw && rw.reset) resetText = resetLabel(rw);
     }
     sreset.textContent = resetText;
     sreset.style.display = resetText ? "" : "none";
