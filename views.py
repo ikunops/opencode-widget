@@ -200,7 +200,7 @@ class FormulaStore:
     """拉取/缓存/回退公式。url 可为 http(s) 或本地文件路径。"""
 
     def __init__(self, url=None, ttl=900):
-        self.url = url or os.environ.get("FORMULA_URL") or ""
+        self.url = url or os.environ.get("FORMULA_URL") or "https://opencode-formula.opencode-widget.workers.dev/formula"
         self.ttl = ttl
         self._formula = None
         self._ts = 0.0
