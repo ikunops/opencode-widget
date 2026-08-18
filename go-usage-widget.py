@@ -36,6 +36,16 @@ WEEK_MS = 7 * 24 * 3600 * 1000
 LIMITS = {"session": 12.0, "weekly": 30.0, "monthly": 60.0}
 # 每一条已应用的 referral credit 对每个用量窗口限额的扩容额度 (官方证据: +$5 → 月限额 60→70, 周限额 30→40)
 CREDIT_PER_APPLIED = 5.0
+# 每个模型的月度使用额度 (官方"使用额度"列, 云端公式 model_quotas 可动态覆盖)
+MODEL_QUOTAS = {
+    "grok-4.5": 15, "gpt-5.6-luna": 15, "glm-5.2": 60, "glm-5.1": 60,
+    "kimi-k3": 15, "kimi-k2.7-code": 60, "kimi-k2.6": 60,
+    "mimo-v2.5": 60, "mimo-v2.5-pro": 15,
+    "minimax-m3": 60, "minimax-m2.7": 60,
+    "qwen3.8-max": 15, "qwen3.7-max": 60, "qwen3.7-plus": 60, "qwen3.6-plus": 60,
+    "deepseek-v4-pro": 60, "deepseek-v4-flash": 60,
+    "hy3": 60,
+}
 
 
 def limit_for(kind, applied_credits=0):
@@ -590,28 +600,35 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             # 其他来源(如 gateway)保留本地聚合的 cost, 避免被官方全量吞掉
             if src == "go" and m in cost_map:
                 s["cost_total"] = cost_map[m]
-            # 反推 token 配额: go 模型只有 $60/月 费用配额, 用当月均价换算 token 配额
+            # 反推 token 配额: go 模型只有月度费用配额, 用当月均价换算 token 配额
             # 用行级当月费用 (与 tokens_m 同一窗口), 避免 cost_map 跨月汇总导致比例失真
             monthly_cost = s["cost_m"] if s["cost_m"] > 0 else cost_map.get(m, 0)
             monthly_tok = s["tokens_in_m"] + s["tokens_out_m"] + s["tokens_cache_m"]
             if monthly_tok > 0 and monthly_cost > 0:
                 avg = monthly_cost / monthly_tok  # USD / token
-                cq_m = 60.0
-                cq_w = 60.0 / 4.345
-                cq_s = 60.0 / (30 * 24 / 5)
+                model_quota = MODEL_QUOTAS.get(m, LIMITS["monthly"])
+                cq_m = model_quota
+                cq_w = model_quota / 4.345
+                cq_s = model_quota / (30 * 24 / 5)
                 s["tq_m"] = cq_m / avg
                 s["tq_w"] = cq_w / avg
                 s["tq_s"] = cq_s / avg
                 tok_m = monthly_tok
                 tok_w = s["tokens_in_w"] + s["tokens_out_w"] + s["tokens_cache_w"]
                 tok_s = s["tokens_in_s"] + s["tokens_out_s"] + s["tokens_cache_s"]
-                s["tp_m"] = min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0 
+                s["tp_m"] = min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0
                 s["tp_w"] = min(100.0, tok_w / s["tq_w"] * 100) if s["tq_w"] else 0.0
                 s["tp_s"] = min(100.0, tok_s / s["tq_s"] * 100) if s["tq_s"] else 0.0
-        # 官方估算: 次均费用 = 月配额$60 / 官方月请求数; 每 token 费用 = 次均 / 官方每次请求 token
+        # 官方估算: 次均费用 = 模型月度额度 / 官方月请求数; 每 token 费用 = 次均 / 官方每次请求 token
         req_lim = REQ_LIMITS.get(m)
-        est_req_cost = (60.0 / req_lim[2]) if req_lim and req_lim[2] else 0.0
+        model_quota = MODEL_QUOTAS.get(m, LIMITS["monthly"])
+        est_req_cost = (model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0
         est_tok_cost = (est_req_cost / TOKENS_PER_REQ[m]) if (m in TOKENS_PER_REQ and TOKENS_PER_REQ[m]) else 0.0
+        # per-model 官方已用 (cost_total 是本地估算, cost_map 是官方权威; go 来源优先用官方)
+        model_used = s["cost_total"]
+        if src == "go" and m in cost_map:
+            model_used = cost_map[m]
+        model_remain = max(0.0, model_quota - model_used)
         out.append({
             "model": m,
             "source": src,
@@ -633,6 +650,9 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             "req_lim": req_lim,
             "est_req_cost": est_req_cost,
             "est_tok_cost": est_tok_cost,
+            "model_quota": model_quota,
+            "model_used": model_used,
+            "model_remain": model_remain,
             "sessions": s["sessions"],
             "prompts": s["prompts"],
             "days": len(s["days"]),
@@ -679,7 +699,8 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                 continue
             p = PRICES.get(nm) or {}
             req_lim = REQ_LIMITS.get(nm)
-            est_req_cost = (60.0 / req_lim[2]) if req_lim and req_lim[2] else 0.0
+            model_quota = MODEL_QUOTAS.get(nm, LIMITS["monthly"])
+            est_req_cost = (model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0
             est_tok_cost = (est_req_cost / TOKENS_PER_REQ[nm]) if (nm in TOKENS_PER_REQ and TOKENS_PER_REQ[nm]) else 0.0
             out.append({
                 "model": nm, "source": "go", "key": gkey,
@@ -695,6 +716,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                 "tq_s": 0.0, "tq_w": 0.0, "tq_m": 0.0,
                 "tp_s": 0.0, "tp_w": 0.0, "tp_m": 0.0,
                 "req_lim": req_lim, "est_req_cost": est_req_cost, "est_tok_cost": est_tok_cost,
+                "model_quota": model_quota, "model_used": 0.0, "model_remain": model_quota,
                 "sessions": 0, "prompts": 0,
                 "days": 0, "rate": 0.0,
                 "cache_read": 0, "cache_write": 0, "cache_hit": 0.0,

@@ -97,6 +97,8 @@ def apply_params_to_gw(formula):
         gw.TOKENS_PER_REQ = dict(p["tokens_per_req"])
     if isinstance(p.get("display_names"), dict):
         gw.DISPLAY_NAMES = dict(p["display_names"])
+    if isinstance(p.get("model_quotas"), dict):
+        gw.MODEL_QUOTAS = dict(p["model_quotas"])
 
 
 def get_formula(force=False):
@@ -302,12 +304,12 @@ def _collect_rows():
             remote_rows = []
             cost_map = {}
     if remote_rows:
-        srv_models = {r["model"] for r in remote_rows}
+        srv_keys = {(r["model"], r.get("src")) for r in remote_rows}
         latest_fetched = ur.read_remote_latest_fetched_at() if ur is not None else 0
         local_rows = gw.read_opencode_all()
         extra = [r for r in local_rows
-                 if r["model"] not in srv_models or r["ts"] > latest_fetched
-                 or r.get("src") not in ("go", "zen")]
+                 if (r["model"], r.get("src")) not in srv_keys
+                 or r["ts"] > latest_fetched]
         return remote_rows + extra, cost_map
 
     srv_rows = []
@@ -323,12 +325,12 @@ def _collect_rows():
                 cost_map = sd.read_cost_map()
             except Exception:
                 pass
-        srv_models = {r["model"] for r in srv_rows}
+        srv_keys = {(r["model"], r.get("src")) for r in srv_rows}
         latest_fetched = sd.read_latest_fetched_at() if sd is not None else 0
         local_rows = gw.read_opencode_all()
         extra = [r for r in local_rows
-                 if r["model"] not in srv_models or r["ts"] > latest_fetched
-                 or r.get("src") not in ("go", "zen")]
+                 if (r["model"], r.get("src")) not in srv_keys
+                 or r["ts"] > latest_fetched]
         return srv_rows + extra, cost_map
     go_rows = gw.read_opencode_all()
     try:

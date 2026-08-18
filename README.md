@@ -125,7 +125,112 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 
 - **总用量 / 小屏主金额** 显示官方口径：账单成本 × 官方计量系数（当前 1.4212，由云端公式 `params.meter.ratio` 定义，云端可变），与 opencode.ai 账单（封顶配额）一致
 - **模型明细 / 每日曲线 / tooltip** 保持原始账单成本，避免明细虚高
-- 切换时间范围（今天/近7天/全部）与供应商时，主金额随之联动，均为官方口径
+ - 切换时间范围（今天/近7天/全部）与供应商时，主金额随之联动，均为官方口径
+
+## 公式与数据源
+
+### 架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Cloudflare Worker (opencode-formula.opencode-widget.workers.dev)      │
+│  · cloud/formula.json → build_worker.py → formula-worker.js           │
+│  · 提供云端公式：params(动态变量) + views(视图定义)                     │
+└───────────────────────────────────────┬─────────────────────────────────┘
+                                        │ HTTP/JSON (每 15 分钟同步)
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  data_server.py (本地)                                                  │
+│  · FormulaStore 拉取/缓存/回退 (TTL 900s, version 热更新)              │
+│  · apply_params_to_gw(): 云端 params → gw 模块级规则表                  │
+│  · 失败静默保留上一版，本地 views.py DEFAULT_FORMULA 兜底              │
+└───────────────────────────────────────┬─────────────────────────────────┘
+                                        │ 127.0.0.1:8765 /api/*
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  go-usage-widget.py (计算引擎)                                          │
+│  · model_stats / supplier_stats / history 等数据函数                    │
+│  · 按云端公式计算 est_req_cost / model_quota / model_remain 等字段     │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 公式来源与优先级
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | 云端 Worker (`/formula`) | `config.json` 的 `formula_url` 指向的 URL |
+| 2 | 本地缓存 | `FormulaStore` 内存缓存，TTL 900s，version 变化时自动热更新 |
+| 3 | 本地默认 | `views.py` `DEFAULT_FORMULA`，离线/云端故障时回退 |
+
+`apply_params_to_gw()` 将云端 `params` 覆盖到 `gw` 模块级规则表（`MODEL_QUOTAS`/`PRICES`/`REQ_LIMITS`/`TOKENS_PER_REQ`/`LIMITS` 等），**缺 key 保持本地默认**，保证降级一致。
+
+### params 参数字典
+
+| 参数 | 类型 | 含义 | 来源 | 改动影响 |
+|------|------|------|------|---------|
+| `meter.ratio` | float | 计量系数（账单×ratio = 官方口径） | 云端 | 总用量/小屏主金额 |
+| `limits.monthly` | float | 月度基础限额（USD） | 云端 | 全局封顶 |
+| `limits.weekly` | float | 周限额（USD） | 云端 | 周窗口配额 |
+| `limits.session` | float | 会话限额（USD） | 云端 | 滚动窗口配额 |
+| `limits.credit_per_applied` | float | 每笔 credits 扩容额度（USD） | 云端 | 全局限额 = monthly + applied_credits × credit_per_applied |
+| `windows.session_ms` | int | 会话窗口时长（毫秒） | 云端 | 重置倒计时 |
+| `windows.week_ms` | int | 周窗口时长（毫秒） | 云端 | 重置倒计时 |
+| `sources.paid` | list | 付费供应商列表 | 云端 | meterRatio 作用范围 |
+| `sources.subset_of` | dict | 子集供应商归属（如 gateway→go） | 云端 | 模型列表去重/聚合 |
+| `free_models.*` | dict | 免费模型判定规则 | 云端 | free 分组 |
+| `providers.src` | dict | provider → source 映射 | 云端 | 数据来源分类 |
+| `providers.prefixes` | list | provider 前缀列表 | 云端 | 模型来源识别 |
+| `prices` | dict | 每模型 in/out/cr/cw 价格（USD/M token） | 云端 | est_req_cost / est_tok_cost |
+| `model_quotas` | dict | 每模型月度使用额度（USD） | 云端 | 模型独立剩余 |
+| `req_limits` | dict | 每模型月度请求数上限 [low, mid, high] | 云端 | est_req_cost = quota / high |
+| `tokens_per_req` | dict | 每模型每次请求平均 token 数 | 云端 | est_tok_cost = est_req_cost / tokens_per_req |
+| `display_names` | dict | 模型显示名 | 云端 | 前端模型名称 |
+| `refresh.formula_s` | int | 公式同步间隔（秒） | 云端 | 后台同步频率 |
+
+### 计算字段追溯表
+
+> 行 = 前端/API 中每个显示数据字段；列 = 来源 / 计算方式 / 代码位置。
+
+| 显示字段 | 来源 | 计算方式 | 代码位置 |
+|----------|------|---------|---------|
+| **小屏主金额（总用量）** | 官方 `cost_summary`（原始账单 Σcost） | `Σcost × meter.ratio`（scope 为 all 或 source in paid） | `views.py` `ViewEngine._apply_post` |
+| **供应商 cost（大窗统计卡）** | 本地聚合（按 src/model/日期） | `Σcost`（原始账单，不乘 ratio） | `data_server.py` `/api/views` |
+| **suppliers.go.cost** | `remote_rows`(官方 `cost_map`) + `extra`(本地补充) | 官方优先，本地仅补充官方没有的 | `data_server.py` `_collect_rows` |
+| **模型明细 cost_m / cost_w / cost_s** | 本地聚合 `s["cost_m"]` 等 | `Σcost`（原始账单） | `go-usage-widget.py` `model_stats` |
+| **est_req_cost（官方估算次均费用）** | 云端 `params.model_quotas` + `req_limits` | `model_quota / req_limits[2]` | `go-usage-widget.py` |
+| **est_tok_cost（官方估算每 token 费用）** | `est_req_cost` + `tokens_per_req` | `est_req_cost / tokens_per_req[m]` | `go-usage-widget.py` |
+| **model_quota（模型月度额度）** | 云端 `params.model_quotas` | 直接读取，缺省 fallback `LIMITS["monthly"]` | `go-usage-widget.py` |
+| **model_used（模型已用费用）** | 官方 `cost_map[m]`（go 来源优先）或本地 `cost_total` | `cost_map[m]`（原始账单，未乘 ratio） | `go-usage-widget.py` |
+| **model_remain（模型剩余额度）** | 计算 | `max(0, model_quota - model_used)` | `go-usage-widget.py` |
+| **effectiveRemain（有效剩余）** | 计算 | `min(model_quota - model_used × meter.ratio, global_limit - global_used)` | `electron/app/index.html` |
+| **remainCnt（剩余次数）** | `effectiveRemain` + `avgPerReq` | `effectiveRemain / avgPerReq` | `electron/app/index.html` |
+| **avgPerReq（次均费用）** | 实际数据或官方估算 | 有数据时 `c / usedCnt`，否则 `est_req_cost` | `electron/app/index.html` |
+| **token 配额 tq_m / tq_w / tq_s** | `model_quota` + 实际均价 | `model_quota / (monthly_cost / monthly_tok)` | `go-usage-widget.py` |
+| **token 使用百分比 tp_m / tp_w / tp_s** | `monthly_tok` + `tq_m` | `min(100, monthly_tok / tq_m × 100)` | `go-usage-widget.py` |
+| **配额百分比（小屏顶部）** | 官方 `quota_snapshot` | `pct = used / limit` | `data_server.py` `/api/state` |
+| **全局限额 quotaLimit** | 官方 `limits.monthly` + `applied_credits` | `monthly + applied_credits × credit_per_applied` | `go-usage-widget.py` |
+| **全局已用 usedAll** | 官方 `cost_summary`（付费来源 Σcost） | `Σcost`（原始账单） | `go-usage-widget.py` |
+
+### 官方口径 vs 原始账单
+
+- **原始账单 cost**：官方 API 返回的 `cost_summary` / `cost_map` 值（如 $49.2551），是未乘系数的值。
+- **官方口径 cost**：原始账单 × `meter.ratio`（当前 1.4212），用于**总用量/小屏主金额/剩余费用计算**。
+- **模型明细/曲线/tooltip**：保持原始账单成本，避免明细虚高。
+
+### 更新云端公式
+
+1. 修改 `cloud/formula.json`
+2. 运行 `python cloud/build_worker.py` 生成 `cloud/formula-worker.js`
+3. 部署到 Cloudflare Worker（参考 `wrangler deploy` 或上传脚本）
+
+> 本地 `views.py` `DEFAULT_FORMULA` 为离线兜底，应与云端版本保持同步（当前均为 v3）。
+
+### 本地同步机制
+
+- `data_server.py` 启动时调用 `get_formula()` 拉取云端公式
+- 后台线程 `formula_sync_loop()` 每 900 秒强制拉取，检测 `version` 变化
+- 版本变化时自动 `apply_params_to_gw()` 覆盖本地规则表 + 重建 `ViewEngine`
+- 云端/网络故障时静默保留上一版已生效公式，不中断服务
 
 ## 目录结构
 

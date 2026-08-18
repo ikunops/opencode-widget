@@ -90,6 +90,15 @@ DEFAULT_FORMULA = {
             "deepseek-v4-flash": {"in": 0.14, "out": 0.28, "cr": 0.0028, "cw": None},
             "hy3": {"in": 0.14, "out": 0.58, "cr": 0.035, "cw": None},
         },
+        "model_quotas": {
+            "grok-4.5": 15, "gpt-5.6-luna": 15, "glm-5.2": 60, "glm-5.1": 60,
+            "kimi-k3": 15, "kimi-k2.7-code": 60, "kimi-k2.6": 60,
+            "mimo-v2.5": 60, "mimo-v2.5-pro": 15,
+            "minimax-m3": 60, "minimax-m2.7": 60,
+            "qwen3.8-max": 15, "qwen3.7-max": 60, "qwen3.7-plus": 60, "qwen3.6-plus": 60,
+            "deepseek-v4-pro": 60, "deepseek-v4-flash": 60,
+            "hy3": 60,
+        },
         "req_limits": {
             "grok-4.5": [120, 300, 600],
             "gpt-5.6-luna": [2050, 5100, 10250],
