@@ -190,6 +190,7 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 ### 计算字段追溯表
 
 > 行 = 前端/API 中每个显示数据字段；列 = 来源 / 计算方式 / 代码位置。
+> 公式注册表为单一真相源，见 `formula_registry.py`；云端 formula.json v4 `formulas` 节为下发副本。
 
 | 显示字段 | 来源 | 计算方式 | 代码位置 |
 |----------|------|---------|---------|
@@ -197,19 +198,22 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 | **供应商 cost（大窗统计卡）** | 本地聚合（按 src/model/日期） | `Σcost`（原始账单，不乘 ratio） | `data_server.py` `/api/views` |
 | **suppliers.go.cost** | `remote_rows`(官方 `cost_map`) + `extra`(本地补充) | 官方优先，本地仅补充官方没有的 | `data_server.py` `_collect_rows` |
 | **模型明细 cost_m / cost_w / cost_s** | 本地聚合 `s["cost_m"]` 等 | `Σcost`（原始账单） | `go-usage-widget.py` `model_stats` |
-| **est_req_cost（官方估算次均费用）** | 云端 `params.model_quotas` + `req_limits` | `model_quota / req_limits[2]` | `go-usage-widget.py` |
-| **est_tok_cost（官方估算每 token 费用）** | `est_req_cost` + `tokens_per_req` | `est_req_cost / tokens_per_req[m]` | `go-usage-widget.py` |
-| **model_quota（模型月度额度）** | 云端 `params.model_quotas` | 直接读取，缺省 fallback `LIMITS["monthly"]` | `go-usage-widget.py` |
-| **model_used（模型已用费用）** | 官方 `cost_map[m]`（go 来源优先）或本地 `cost_total` | `cost_map[m]`（原始账单，未乘 ratio） | `go-usage-widget.py` |
-| **model_remain（模型剩余额度）** | 计算 | `max(0, model_quota - model_used)` | `go-usage-widget.py` |
-| **effectiveRemain（有效剩余）** | 计算 | `min(model_quota - model_used × meter.ratio, global_limit - global_used)` | `electron/app/index.html` |
-| **remainCnt（剩余次数）** | `effectiveRemain` + `avgPerReq` | `effectiveRemain / avgPerReq` | `electron/app/index.html` |
-| **avgPerReq（次均费用）** | 实际数据或官方估算 | 有数据时 `c / usedCnt`，否则 `est_req_cost` | `electron/app/index.html` |
-| **token 配额 tq_m / tq_w / tq_s** | `model_quota` + 实际均价 | `model_quota / (monthly_cost / monthly_tok)` | `go-usage-widget.py` |
-| **token 使用百分比 tp_m / tp_w / tp_s** | `monthly_tok` + `tq_m` | `min(100, monthly_tok / tq_m × 100)` | `go-usage-widget.py` |
+| **est_req_cost（官方估算次均费用）** | 云端 `params.model_quotas` + `req_limits` | `model_quota / req_limits[2]` | `formula_registry.py` → `go-usage-widget.py` |
+| **est_tok_cost（官方估算每 token 费用）** | `est_req_cost` + `tokens_per_req` | `est_req_cost / tokens_per_req[m]` | `formula_registry.py` → `go-usage-widget.py` |
+| **model_quota（模型月度额度）** | 云端 `params.model_quotas` | 直接读取，缺省 fallback `LIMITS["monthly"]` | `formula_registry.py` → `go-usage-widget.py` |
+| **model_used（模型已用费用）** | 官方 `cost_map[m]`（go 来源优先）或本地 `cost_total` | `cost_map[m]`（原始账单，未乘 ratio） | `formula_registry.py` → `go-usage-widget.py` |
+| **model_remain（模型剩余额度）** | 计算 | `max(0, model_quota - model_used)` | `formula_registry.py` → `go-usage-widget.py` |
+| **effectiveRemain（有效剩余）** | 计算 | `min(model_remain, global_remain)` | `formula_registry.py` → `data_server.py` → `index.html` |
+| **remainCnt（剩余次数）** | `effectiveRemain` + `avgPerReq` | `effective_remain / avg_per_req` | `formula_registry.py` → `data_server.py` → `index.html` |
+| **avgPerReq（次均费用）** | 实际数据或官方估算 | 有数据时 `c / usedCnt`，否则 `est_req_cost` | `formula_registry.py` → `data_server.py` → `index.html` |
+| **token 配额 tq_m / tq_w / tq_s** | `model_quota` + 实际均价 | `cq_monthly / avg_monthly_cost` | `formula_registry.py` → `go-usage-widget.py` |
+| **token 使用百分比 tp_m / tp_w / tp_s** | `monthly_tok` + `tq_m` | `min(100, monthly_tok / tq_m × 100)` | `formula_registry.py` → `go-usage-widget.py` |
 | **配额百分比（小屏顶部）** | 官方 `quota_snapshot` | `pct = used / limit` | `data_server.py` `/api/state` |
-| **全局限额 quotaLimit** | 官方 `limits.monthly` + `applied_credits` | `monthly + applied_credits × credit_per_applied` | `go-usage-widget.py` |
-| **全局已用 usedAll** | 官方 `cost_summary`（付费来源 Σcost） | `Σcost`（原始账单） | `go-usage-widget.py` |
+| **全局限额 quotaLimit** | 官方 `limits.monthly` + `applied_credits` | `monthly + applied_credits × credit_per_applied` | `formula_registry.py` → `go-usage-widget.py` |
+| **全局已用 usedAll** | 官方 `cost_summary`（付费来源 Σcost） | `Σcost`（原始账单） | `formula_registry.py` → `go-usage-widget.py` |
+| **cache_hit（缓存命中率）** | 本地 `usage_records` | `cache_read / (cache_read + tokens_in) × 100` | `formula_registry.py` → `go-usage-widget.py` |
+| **rate（速率）** | 本地 `usage_records` | `tok_sec_sum / tok_sec_n` | `formula_registry.py` → `go-usage-widget.py` |
+| **token 配额反推(前端)** | `model_quota` + 实际均价 | `used_tokens + remain_cost / avg_cost_per_token` | `formula_registry.py` → `data_server.py` → `index.html` |
 
 ### 官方口径 vs 原始账单
 
@@ -219,11 +223,13 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 
 ### 更新云端公式
 
-1. 修改 `cloud/formula.json`
+1. 修改 `cloud/formula.json`（params + constants + formulas 三节）
 2. 运行 `python cloud/build_worker.py` 生成 `cloud/formula-worker.js`
 3. 部署到 Cloudflare Worker（参考 `wrangler deploy` 或上传脚本）
+4. 本地 `data_server.py` 每 900s 自动拉取，版本变化时热更新；云端故障时静默保留上一版
 
-> 本地 `views.py` `DEFAULT_FORMULA` 为离线兜底，应与云端版本保持同步（当前均为 v3）。
+> 本地 `views.py` `DEFAULT_FORMULA` 为离线兜底，应与云端版本保持同步（当前均为 v4）。
+> 公式注册表 `formula_registry.py` 为本地执行层，云端只下发元数据（display/source/expr/params），不执行任意代码。
 
 ### 本地同步机制
 

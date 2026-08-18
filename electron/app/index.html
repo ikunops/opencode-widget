@@ -700,17 +700,16 @@ function fillModelList(el, key) {
     let barPct = 0, extra = "", rem = "";
     if (isQuota) {
       // go 次数模式: 次数 · 消费/模型配额 · 剩余次数
-      // 次均费用 = 实际均价(已使用) 或 官方估算(未使用); 剩余次数 = 剩余费用 / 次均费用
-      // 有效剩余 = min(模型额度 - 模型已用, 全局剩余), 旧账号封顶时全局剩余=0 → 全部显示0
+      // 有效剩余 / 次均费用 / 剩余次数 均由后端计算，前端直接读取
       const c = costOf(x);
       const usedCnt = x[key] || 0;
-      const avgPerReq = (c > 0 && usedCnt > 0) ? c / usedCnt : (x.est_req_cost || 0);
+      const avgPerReq = x.avg_per_req != null ? x.avg_per_req : ((c > 0 && usedCnt > 0) ? c / usedCnt : (x.est_req_cost || 0));
       const modelQuota = (x.model_quota != null) ? x.model_quota : quotaLimit;
       const modelUsed = (x.model_used != null ? x.model_used : c) * meterRatio(x.source);
       const modelRemain = Math.max(0, modelQuota - modelUsed);
       const globalRemain = Math.max(0, quotaLimit - usedAll);
-      const effectiveRemain = Math.min(modelRemain, globalRemain);
-      const remainCnt = (avgPerReq > 0) ? effectiveRemain / avgPerReq : 0;
+      const effectiveRemain = x.effective_remain != null ? x.effective_remain : Math.min(modelRemain, globalRemain);
+      const remainCnt = x.remain_cnt != null ? x.remain_cnt : ((avgPerReq > 0) ? effectiveRemain / avgPerReq : 0);
       const totalCnt = usedCnt + remainCnt;
       const pct = totalCnt > 0 ? Math.min(100, usedCnt / totalCnt * 100) : 0;
       main = usedCnt + "次";
@@ -719,11 +718,8 @@ function fillModelList(el, key) {
       if (effectiveRemain > 0 && remainCnt > 0) rem = `<span class="rem">剩${Math.round(remainCnt)}次</span>`;
     } else if (x.group === "go") {
       // go token 模式: 已使用 · 百分比 · 该模型总量(已用 + 剩余共享费用按本模型均价折算)
-      // 每 token 费用 = 实际均价(已使用) 或 官方估算(未使用)
       const usedTok = windowTokens(x, mode);
-      const c = costOf(x);
-      const avg = (c > 0 && usedTok > 0) ? c / usedTok : (x.est_tok_cost || 0);
-      const totalTok = (avg > 0) ? usedTok + remainAll / avg : usedTok;
+      const totalTok = x.token_quota_reverse != null ? x.token_quota_reverse : usedTok;
       const pct = totalTok > 0 ? Math.min(100, usedTok / totalTok * 100) : 0;
       main = fmtTokens(usedTok);
       barPct = pct;

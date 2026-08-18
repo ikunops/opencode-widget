@@ -23,8 +23,8 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 
 DEFAULT_FORMULA = {
-    "version": 3,
-    "source_note": "内置默认公式 (离线回退, 与云端 v3 一致)",
+    "version": 4,
+    "source_note": "内置默认公式 (离线回退, 与云端 v4 一致)",
     "params": {
         "meter": {
             "ratio": 1.4212,
@@ -171,6 +171,40 @@ DEFAULT_FORMULA = {
         },
         "refresh": {"formula_s": 900},
     },
+    "constants": {
+        "weeks_per_month": 4.345,
+        "periods_per_day": 6.0,
+        "note": "魔法常数，云端可调，本地回退默认值"
+    },
+    "formulas": {
+        "tok_agg": {"display": "token 总量", "source": "官方 usage_records", "expr": "tokens_in + tokens_out + tokens_cache", "params": ["tokens_in", "tokens_out", "tokens_cache"], "used_by": ["go-usage-widget.py", "data_server.py"]},
+        "cost_agg": {"display": "原始账单 cost", "source": "官方 API 返回原始值", "expr": "Σcost", "params": ["cost"], "used_by": ["go-usage-widget.py"]},
+        "meter_total": {"display": "官方口径总用量", "source": "官方 cost_summary + 云端 params.meter", "expr": "Σcost × meter.ratio  (当前 1.4212)", "params": ["cost", "meter_ratio", "scope_all", "paid_sources", "source"], "used_by": ["views.py"]},
+        "model_quota": {"display": "模型月度额度", "source": "云端 params.model_quotas", "expr": "MODEL_QUOTAS[m] (缺省 LIMITS.monthly)", "params": ["model", "model_quotas", "monthly_limit"], "used_by": ["go-usage-widget.py"]},
+        "est_req_cost": {"display": "官方估算次均费用", "source": "云端 params.model_quotas + req_limits", "expr": "model_quota / req_limits[2]", "params": ["model_quota", "req_limits"], "used_by": ["go-usage-widget.py"]},
+        "est_tok_cost": {"display": "官方估算每 token 费用", "source": "est_req_cost + 云端 params.tokens_per_req", "expr": "est_req_cost / tokens_per_req[m]", "params": ["est_req_cost", "tokens_per_req"], "used_by": ["go-usage-widget.py"]},
+        "model_used": {"display": "模型已用费用", "source": "官方 cost_map 权威 / 本地聚合", "expr": "cost_map[m] (go优先) 或 cost_total", "params": ["cost_map", "model", "source", "cost_total"], "used_by": ["go-usage-widget.py"]},
+        "model_remain": {"display": "模型剩余额度", "source": "model_quota + model_used", "expr": "max(0, model_quota - model_used)", "params": ["model_quota", "model_used"], "used_by": ["go-usage-widget.py"]},
+        "global_limit": {"display": "全局限额", "source": "官方 limits + sync_meta", "expr": "monthly + applied_credits × credit_per_applied", "params": ["monthly_limit", "applied_credits", "credit_per_applied"], "used_by": ["go-usage-widget.py"]},
+        "used_all": {"display": "全局已用", "source": "官方 cost_summary", "expr": "Σcost (付费来源)", "params": ["used_all"], "used_by": ["go-usage-widget.py"]},
+        "cq_weekly": {"display": "周配额", "source": "model_quota + 云端 params.weeks_per_month", "expr": "model_quota / weeks_per_month  (当前 4.345)", "params": ["model_quota", "weeks_per_month"], "used_by": ["go-usage-widget.py"]},
+        "cq_session": {"display": "时段配额", "source": "model_quota + 云端 params.periods_per_day", "expr": "model_quota / periods_per_day  (当前 6.0)", "params": ["model_quota", "periods_per_day"], "used_by": ["go-usage-widget.py"]},
+        "tq_monthly": {"display": "token 配额反推(月)", "source": "model_quota + 实际月度均价", "expr": "cq_monthly / avg_monthly_cost_per_token", "params": ["cq_monthly", "avg_monthly_cost_per_token"], "used_by": ["go-usage-widget.py"]},
+        "tq_weekly": {"display": "token 配额反推(周)", "source": "model_quota + 实际周均价", "expr": "cq_weekly / avg_weekly_cost_per_token", "params": ["cq_weekly", "avg_weekly_cost_per_token"], "used_by": ["go-usage-widget.py"]},
+        "tq_session": {"display": "token 配额反推(时段)", "source": "model_quota + 实际时段均价", "expr": "cq_session / avg_session_cost_per_token", "params": ["cq_session", "avg_session_cost_per_token"], "used_by": ["go-usage-widget.py"]},
+        "tp_monthly": {"display": "token 使用百分比(月)", "source": "monthly_tok + tq_m", "expr": "min(100, monthly_tok / tq_m × 100)", "params": ["tok_monthly", "tq_monthly"], "used_by": ["go-usage-widget.py"]},
+        "tp_weekly": {"display": "token 使用百分比(周)", "source": "weekly_tok + tq_w", "expr": "min(100, weekly_tok / tq_w × 100)", "params": ["tok_weekly", "tq_weekly"], "used_by": ["go-usage-widget.py"]},
+        "tp_session": {"display": "token 使用百分比(时段)", "source": "session_tok + tq_s", "expr": "min(100, session_tok / tq_s × 100)", "params": ["tok_session", "tq_session"], "used_by": ["go-usage-widget.py"]},
+        "effective_remain": {"display": "有效剩余", "source": "model_remain + global_remain", "expr": "min(model_remain, global_remain)", "params": ["model_remain", "global_remain"], "used_by": ["electron/app/index.html"]},
+        "avg_per_req": {"display": "次均费用", "source": "实际已用 或 官方估算", "expr": "有数据时 c / usedCnt，否则 est_req_cost", "params": ["cost_of_period", "used_count", "est_req_cost"], "used_by": ["electron/app/index.html"]},
+        "remain_cnt": {"display": "剩余次数", "source": "effectiveRemain + avgPerReq", "expr": "effective_remain / avg_per_req", "params": ["effective_remain", "avg_per_req"], "used_by": ["electron/app/index.html"]},
+        "cache_hit": {"display": "缓存命中率", "source": "本地 usage_records", "expr": "cache_read / (cache_read + tokens_in) × 100", "params": ["cache_read", "tokens_in"], "used_by": ["go-usage-widget.py", "electron/app/index.html"]},
+        "rate": {"display": "速率", "source": "本地 usage_records", "expr": "tok_sec_sum / tok_sec_n  (tok/s)", "params": ["tok_sec_sum", "tok_sec_n"], "used_by": ["go-usage-widget.py", "electron/app/index.html"]},
+        "pct": {"display": "百分比", "source": "计算", "expr": "min(100, part / total × 100)", "params": ["part", "total"], "used_by": ["go-usage-widget.py", "electron/app/index.html"]},
+        "token_quota_reverse": {"display": "token 配额反推(前端)", "source": "model_quota + 实际月度均价", "expr": "used_tokens + remain_cost / avg_cost_per_token", "params": ["used_tokens", "remain_cost", "avg_cost_per_token"], "used_by": ["electron/app/index.html"]},
+        "dedup_rule": {"display": "去重规则", "source": "remote_rows(官方) + extra(本地)", "expr": "(model, src) 联合去重，官方优先", "params": [], "used_by": ["data_server.py"]},
+        "supplier_agg": {"display": "供应商聚合", "source": "本地聚合（按 src）", "expr": "Σtokens / Σcount / Σcost", "params": [], "used_by": ["data_server.py"]}
+    },
     "views": [
         {"id": "all_today",  "label": "全部 · 今天",   "scope": {"all": True}, "range": "today", "group": None,
          "agg": ["cost", "tokens", "count", "days"], "post": [{"op": "meterRatio", "on": "cost"}]},
@@ -268,6 +302,8 @@ class FormulaStore:
             raise FormulaError("公式必须是 JSON 对象")
         if "params" not in f or "views" not in f:
             raise FormulaError("公式缺少 params 或 views")
+        if "formulas" in f and not isinstance(f["formulas"], dict):
+            raise FormulaError("formulas 必须是对象")
 
 
 class ViewEngine:

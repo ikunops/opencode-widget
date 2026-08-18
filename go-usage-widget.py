@@ -10,6 +10,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 
+import formula_registry as fr
+
 # 日期聚合统一用系统本地时区 (数据时间戳为 UTC, 用户在北京时间看"今天"需按本地边界)
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
@@ -608,27 +610,27 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
                 avg = monthly_cost / monthly_tok  # USD / token
                 model_quota = MODEL_QUOTAS.get(m, LIMITS["monthly"])
                 cq_m = model_quota
-                cq_w = model_quota / 4.345
-                cq_s = model_quota / (30 * 24 / 5)
+                cq_w = fr.compute("cq_weekly", model_quota=model_quota, weeks_per_month=4.345)
+                cq_s = fr.compute("cq_session", model_quota=model_quota, periods_per_day=6.0)
                 s["tq_m"] = cq_m / avg
                 s["tq_w"] = cq_w / avg
                 s["tq_s"] = cq_s / avg
                 tok_m = monthly_tok
                 tok_w = s["tokens_in_w"] + s["tokens_out_w"] + s["tokens_cache_w"]
                 tok_s = s["tokens_in_s"] + s["tokens_out_s"] + s["tokens_cache_s"]
-                s["tp_m"] = min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0
-                s["tp_w"] = min(100.0, tok_w / s["tq_w"] * 100) if s["tq_w"] else 0.0
-                s["tp_s"] = min(100.0, tok_s / s["tq_s"] * 100) if s["tq_s"] else 0.0
+                s["tp_m"] = fr.compute("tp_monthly", tok_monthly=tok_m, tq_monthly=s["tq_m"]) or min(100.0, tok_m / s["tq_m"] * 100) if s["tq_m"] else 0.0
+                s["tp_w"] = fr.compute("tp_weekly", tok_weekly=tok_w, tq_weekly=s["tq_w"]) or min(100.0, tok_w / s["tq_w"] * 100) if s["tq_w"] else 0.0
+                s["tp_s"] = fr.compute("tp_session", tok_session=tok_s, tq_session=s["tq_s"]) or min(100.0, tok_s / s["tq_s"] * 100) if s["tq_s"] else 0.0
         # 官方估算: 次均费用 = 模型月度额度 / 官方月请求数; 每 token 费用 = 次均 / 官方每次请求 token
         req_lim = REQ_LIMITS.get(m)
         model_quota = MODEL_QUOTAS.get(m, LIMITS["monthly"])
-        est_req_cost = (model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0
-        est_tok_cost = (est_req_cost / TOKENS_PER_REQ[m]) if (m in TOKENS_PER_REQ and TOKENS_PER_REQ[m]) else 0.0
+        est_req_cost = fr.compute("est_req_cost", model_quota=model_quota, req_limits=req_lim) or ((model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0)
+        est_tok_cost = fr.compute("est_tok_cost", est_req_cost=est_req_cost, tokens_per_req=TOKENS_PER_REQ.get(m)) or ((est_req_cost / TOKENS_PER_REQ[m]) if (m in TOKENS_PER_REQ and TOKENS_PER_REQ[m]) else 0.0)
         # per-model 官方已用 (cost_total 是本地估算, cost_map 是官方权威; go 来源优先用官方)
         model_used = s["cost_total"]
         if src == "go" and m in cost_map:
             model_used = cost_map[m]
-        model_remain = max(0.0, model_quota - model_used)
+        model_remain = fr.compute("model_remain", model_quota=model_quota, model_used=model_used) or max(0.0, model_quota - model_used)
         out.append({
             "model": m,
             "source": src,
@@ -700,8 +702,8 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             p = PRICES.get(nm) or {}
             req_lim = REQ_LIMITS.get(nm)
             model_quota = MODEL_QUOTAS.get(nm, LIMITS["monthly"])
-            est_req_cost = (model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0
-            est_tok_cost = (est_req_cost / TOKENS_PER_REQ[nm]) if (nm in TOKENS_PER_REQ and TOKENS_PER_REQ[nm]) else 0.0
+            est_req_cost = fr.compute("est_req_cost", model_quota=model_quota, req_limits=req_lim) or ((model_quota / req_lim[2]) if req_lim and req_lim[2] else 0.0)
+            est_tok_cost = fr.compute("est_tok_cost", est_req_cost=est_req_cost, tokens_per_req=TOKENS_PER_REQ.get(nm)) or ((est_req_cost / TOKENS_PER_REQ[nm]) if (nm in TOKENS_PER_REQ and TOKENS_PER_REQ[nm]) else 0.0)
             out.append({
                 "model": nm, "source": "go", "key": gkey,
                 "is_free": False, "group": "go",

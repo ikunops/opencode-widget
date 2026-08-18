@@ -3,6 +3,9 @@
 import json, urllib.request, zipfile, re, os, sys
 from datetime import datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import formula_registry as fr
+
 # 尝试 openpyxl
 try:
     import openpyxl
@@ -202,33 +205,21 @@ def generate_xlsx(models, state, template_rows=None):
 
     # ---------- Sheet2: 公式说明 ----------
     ws2 = wb.create_sheet(title="公式说明")
-    ws2.append(["公式名称", "来源", "计算方式", "代码位置", "备注"])
+    ws2.append(["公式ID", "公式名称", "来源", "计算方式", "代码位置", "备注"])
     for cell in ws2[1]:
         cell.font = header_font
         cell.fill = header_fill
         cell.border = thin_border
 
-    formulas = [
-        ("官方口径总用量", "官方 cost_summary + 云端 params.meter.ratio", "Σcost × meter.ratio", "views.py ViewEngine._apply_post", "小屏主金额/供应商总览"),
-        ("原始账单 cost", "官方 API 返回原始值", "Σcost", "go-usage-widget.py", "模型明细/曲线/tooltip 保持原始"),
-        ("token 总量", "官方 usage_records", "tokens_in + tokens_out + tokens_cache", "go-usage-widget.py", "每列分别聚合"),
-        ("est_req_cost", "云端 params.model_quotas + req_limits", "model_quota / req_limits[2]", "go-usage-widget.py", "官方估算次均费用"),
-        ("est_tok_cost", "est_req_cost + 云端 params.tokens_per_req", "est_req_cost / tokens_per_req", "go-usage-widget.py", "官方估算每 token 费用"),
-        ("model_quota", "云端 params.model_quotas", "params.model_quotas[m]", "go-usage-widget.py", "缺省 fallback LIMITS['monthly']"),
-        ("model_used", "官方 cost_map 权威 / 本地聚合", "cost_map[m] (go优先) 或 cost_total", "go-usage-widget.py", "原始账单未乘 ratio"),
-        ("model_remain", "model_quota + model_used", "max(0, model_quota - model_used)", "go-usage-widget.py", "模型独立剩余额度"),
-        ("全局限额", "官方 limits + sync_meta", "monthly + applied_credits × credit_per_applied", "go-usage-widget.py", "global_limit"),
-        ("全局已用", "官方 cost_summary", "Σcost (付费来源)", "go-usage-widget.py", "usedAll"),
-        ("有效剩余", "model_remain + global_remain", "min(model_quota - model_used×ratio, global_limit - global_used)", "electron/app/index.html", "旧账号封顶时=0"),
-        ("剩余次数", "effectiveRemain + avgPerReq", "effectiveRemain / avgPerReq", "electron/app/index.html", "次数模式显示"),
-        ("avgPerReq", "实际已用 或 官方估算", "有数据时 c/usedCnt，否则 est_req_cost", "electron/app/index.html", "次均费用"),
-        ("token 配额反推", "model_quota + 实际月度均价", "model_quota / (monthly_cost / monthly_tok)", "go-usage-widget.py", "tq_m/tq_w/tq_s"),
-        ("token 使用百分比", "monthly_tok + tq_m", "min(100, monthly_tok / tq_m × 100)", "go-usage-widget.py", "tp_m/tp_w/tp_s"),
-        ("配额百分比", "官方 quota_snapshot", "pct = used / limit", "data_server.py /api/state", "小屏顶部百分比"),
-        ("去重规则", "remote_rows(官方) + extra(本地)", "(model, src) 联合去重，官方优先", "data_server.py _collect_rows", "官方优先本地补充"),
-    ]
-    for name, src, expr, code, note in formulas:
-        ws2.append([name, src, expr, code, note])
+    for row in fr.FORMULA_TABLE():
+        ws2.append([
+            row.get("id", ""),
+            row.get("display", ""),
+            row.get("source", ""),
+            row.get("expr", ""),
+            row.get("used_by", ""),
+            row.get("params", ""),
+        ])
 
     for col in ws2.columns:
         max_length = 0

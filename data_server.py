@@ -32,6 +32,7 @@ except Exception:
     ur = None
 
 import views as vw
+import formula_registry as fr
 
 PORT = 8765
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
@@ -109,6 +110,7 @@ def get_formula(force=False):
         _FORMULA_STORE = vw.FormulaStore(url=url)
     f = _FORMULA_STORE.get(force=force)
     apply_params_to_gw(f)
+    fr.apply_formulas(f.get("formulas") if isinstance(f, dict) else None)
     with _FORMULA_LOCK:
         _FORMULA_ENGINE = vw.ViewEngine(f, norm=gw.norm_model,
                                         is_free=gw.is_free_model,
@@ -186,6 +188,55 @@ def build_state():
     cal = {k: v for k, v in (cfg.get("calibration") or {}).items() if v}
     srv_cfg = cfg.get("server") or {}
     srv = _latest_server_quota() or None
+
+    # ---- 用注册表补充展示类数值指标 ----
+    try:
+        quota_limit = gw.limit_for("monthly", applied_credits) or 60.0
+        global_limit = quota_limit
+        used_all = sum((x.get("cost_total") or 0.0) for x in stats)
+        global_remain = max(0.0, global_limit - used_all)
+        weeks_per_month = float((_FORMULA_STORE.get({}).get("constants", {}) or {}).get("weeks_per_month", 4.345))
+        periods_per_day = float((_FORMULA_STORE.get({}).get("constants", {}) or {}).get("periods_per_day", 6.0))
+
+        for x in stats:
+            mq = x.get("model_quota") or 0.0
+            mu = x.get("model_used") or 0.0
+            mr = max(0.0, mq - mu)
+            x["model_remain"] = fr.compute("model_remain", model_quota=mq, model_used=mu) or mr
+
+            cq_w = fr.compute("cq_weekly", model_quota=mq, weeks_per_month=weeks_per_month)
+            cq_s = fr.compute("cq_session", model_quota=mq, periods_per_day=periods_per_day)
+            x["cq_weekly"] = cq_w
+            x["cq_session"] = cq_s
+
+            monthly_tok = (x.get("tokens_in_m") or 0) + (x.get("tokens_out_m") or 0) + (x.get("tokens_cache_m") or 0)
+            weekly_tok = (x.get("tokens_in_w") or 0) + (x.get("tokens_out_w") or 0) + (x.get("tokens_cache_w") or 0)
+            session_tok = (x.get("tokens_in_s") or 0) + (x.get("tokens_out_s") or 0) + (x.get("tokens_cache_s") or 0)
+
+            monthly_cost = x.get("cost_m") or 0.0
+            if monthly_cost > 0 and monthly_tok > 0:
+                avg_monthly = monthly_cost / monthly_tok
+                weekly_cost = x.get("cost_w") or 0.0
+                avg_weekly = weekly_cost / weekly_tok if weekly_tok > 0 else 0.0
+                session_cost = x.get("cost_s") or 0.0
+                avg_session = session_cost / session_tok if session_tok > 0 else 0.0
+            else:
+                avg_monthly = avg_weekly = avg_session = 0.0
+
+            x["tq_monthly"] = fr.compute("tq_monthly", cq_monthly=mq, avg_monthly_cost_per_token=avg_monthly)
+            x["tq_weekly"] = fr.compute("tq_weekly", cq_weekly=cq_w, avg_weekly_cost_per_token=avg_weekly)
+            x["tq_session"] = fr.compute("tq_session", cq_session=cq_s, avg_session_cost_per_token=avg_session)
+            x["tp_monthly"] = fr.compute("tp_monthly", tok_monthly=monthly_tok, tq_monthly=x.get("tq_monthly") or 1)
+            x["tp_weekly"] = fr.compute("tp_weekly", tok_weekly=weekly_tok, tq_weekly=x.get("tq_weekly") or 1)
+            x["tp_session"] = fr.compute("tp_session", tok_session=session_tok, tq_session=x.get("tq_session") or 1)
+
+            x["effective_remain"] = fr.compute("effective_remain", model_remain=mr, global_remain=global_remain) or min(mr, global_remain)
+            x["avg_per_req"] = fr.compute("avg_per_req", cost_of_period=x.get("cost_m") or 0.0, used_count=x.get("count_m") or 0, est_req_cost=x.get("est_req_cost") or 0.0)
+            x["remain_cnt"] = fr.compute("remain_cnt", effective_remain=x.get("effective_remain") or 0.0, avg_per_req=x.get("avg_per_req") or 0.0)
+            x["cache_hit"] = fr.compute("cache_hit", cache_read=x.get("cache_read") or 0, tokens_in=x.get("tokens_in") or 0)
+            x["rate"] = fr.compute("rate", tok_sec_sum=x.get("tok_sec_sum") or 0.0, tok_sec_n=x.get("tok_sec_n") or 0)
+    except Exception:
+        pass
 
     return {
         "windows": windows,
@@ -494,6 +545,8 @@ class Handler(BaseHTTPRequestHandler):
                 "fetched_at": meta["fetched_at"],
                 "params": f.get("params"),
                 "views": f.get("views"),
+                "constants": f.get("constants"),
+                "formulas": fr.FORMULA_TABLE(),
             })
         elif path == "/api/views":
             f = get_formula()
