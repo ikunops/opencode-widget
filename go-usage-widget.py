@@ -34,10 +34,23 @@ DASH_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 SESSION_MS = 5 * 3600 * 1000
 WEEK_MS = 7 * 24 * 3600 * 1000
-# 基础限额 (官方: $12/5h, $30/周, $60/月)
+# 基础限额 (官方: $12/5h, $30/周, $60/月) —— 官方 pct 分母恒为基础额度, 奖励额度不扩容分母
 LIMITS = {"session": 12.0, "weekly": 30.0, "monthly": 60.0}
-# 每一条已应用的 referral credit 对每个用量窗口限额的扩容额度 (官方证据: +$5 → 月限额 60→70, 周限额 30→40)
+# 每条 referral credit 抵扣 $5 已用量 (从 used 中减, 不改变分母; 是否已抵扣由账户实际使用决定)
 CREDIT_PER_APPLIED = 5.0
+
+# 分模型折算率: 官方把 $1 该模型消费换算成多少 $ used (2026-08 数据拟合 RMSE=$0.16)
+# 官方 used = RATE_INTERCEPT + Σ(模型消费 × rate); 云端公式 params.meter.rates 可覆盖
+MODEL_RATES = {
+    "deepseek-v4-pro": 3.69, "glm-5.2": 2.50, "kimi-k3": 0.94,
+    "gpt-5.6-luna": 0.72, "deepseek-v4-flash": 0.60,
+}
+RATE_DEFAULT = 0.56
+RATE_INTERCEPT = 0.21
+
+
+def rate_for(model):
+    return MODEL_RATES.get(model, RATE_DEFAULT)
 # 每个模型的月度使用额度 (官方"使用额度"列, 云端公式 model_quotas 可动态覆盖)
 MODEL_QUOTAS = {
     "grok-4.5": 15, "gpt-5.6-luna": 15, "glm-5.2": 60, "glm-5.1": 60,
@@ -51,8 +64,13 @@ MODEL_QUOTAS = {
 
 
 def limit_for(kind, applied_credits=0):
-    """有效限额 = 基础限额 + 已应用信用额度数 × CREDIT_PER_APPLIED。"""
-    return LIMITS.get(kind, 0.0) + CREDIT_PER_APPLIED * (applied_credits or 0)
+    """有效限额 = 基础限额 (官方 pct 分母恒为基础额度, credits 不扩容分母)。"""
+    return LIMITS.get(kind, 0.0)
+
+
+def deduct_for(applied_credits=0):
+    """已应用 credit 对应的抵扣总额 (从 used 中减; 实际是否抵扣以账户使用为准)。"""
+    return CREDIT_PER_APPLIED * (applied_credits or 0)
 
 PRICES = {
     "grok-4.5":          {"in": 2.00, "out": 6.00, "cr": 0.30, "cw": None},
@@ -473,7 +491,15 @@ def month_bounds(now_ms, subscribe_ms):
 
 
 def build_windows(rows, now_ms, applied_credits=0):
+    # 折算口径: 每条消费按模型折算率换算成官方 used (官方 pct 分母=基础额度)
+    def rated(r):
+        c = r.get("cost") or 0.0
+        if not c:
+            return 0.0
+        return c * rate_for(norm_model(r["model"]))
+
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
+    rated_costs = [(r["ts"], rated(r)) for r in rows]
     paid = [(t, c) for t, c in costs if c]
     earliest = min((t for t, _ in paid), default=now_ms)
 
@@ -481,16 +507,18 @@ def build_windows(rows, now_ms, applied_credits=0):
     ws, we = week_bounds(now_ms)
     ms, me = month_bounds(now_ms, earliest)
 
-    s_used = sum(c for t, c in costs if session_start <= t < now_ms)
-    w_used = sum(c for t, c in costs if ws <= t < we)
-    m_used = sum(c for t, c in costs if ms <= t < me)
+    # 注: 官方周窗口为周期首请求锚定制、5h 窗口为周期制; 本地以滚动窗口近似,
+    # 有官网抓取时 _apply_server_quota 会用官方 pct 覆盖。
+    s_used = RATE_INTERCEPT + sum(c for t, c in rated_costs if session_start <= t < now_ms)
+    w_used = RATE_INTERCEPT + sum(c for t, c in rated_costs if ws <= t < we)
+    m_used = RATE_INTERCEPT + sum(c for t, c in rated_costs if ms <= t < me)
 
     s_oldest = min((t for t, c in costs if session_start <= t < now_ms), default=now_ms)
     s_reset = s_oldest + SESSION_MS if s_oldest > session_start else now_ms + SESSION_MS
 
     def mk(kind, used, reset_ms):
-        limit = limit_for(kind, applied_credits)
-        pct = min(100.0, used / limit * 100) if limit else 0.0
+        limit = limit_for(kind)
+        pct = min(100.0, max(0.0, used / limit * 100)) if limit else 0.0
         return {"kind": kind, "used": used, "limit": limit, "pct": pct, "reset": reset_ms}
 
     return [
@@ -655,6 +683,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             "model_quota": model_quota,
             "model_used": model_used,
             "model_remain": model_remain,
+            "meter_rate": rate_for(m),
             "sessions": s["sessions"],
             "prompts": s["prompts"],
             "days": len(s["days"]),

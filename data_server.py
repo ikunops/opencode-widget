@@ -100,6 +100,14 @@ def apply_params_to_gw(formula):
         gw.DISPLAY_NAMES = dict(p["display_names"])
     if isinstance(p.get("model_quotas"), dict):
         gw.MODEL_QUOTAS = dict(p["model_quotas"])
+    meter = p.get("meter") or {}
+    if isinstance(meter, dict):
+        if isinstance(meter.get("rates"), dict):
+            gw.MODEL_RATES = dict(meter["rates"])
+        if meter.get("rate_default") is not None:
+            gw.RATE_DEFAULT = float(meter["rate_default"])
+        if meter.get("rate_intercept") is not None:
+            gw.RATE_INTERCEPT = float(meter["rate_intercept"])
 
 
 def get_formula(force=False):
@@ -156,9 +164,9 @@ def build_state():
         pass
     applied_credits = _applied_credits()
     try:
-        rows, _ = _collect_rows()
+        rows, cost_map = _collect_rows()
     except Exception:
-        rows = []
+        rows, cost_map = [], {}
     try:
         key = _effective_key()
         key_ok = bool(key)
@@ -175,7 +183,7 @@ def build_state():
     windows = gw.build_windows(rows, now_ms, applied_credits=applied_credits)
     _apply_calibration(windows)
     _apply_server_quota(windows, applied_credits)
-    stats = gw.model_stats(rows, now_ms, None, all_go_models)
+    stats = gw.model_stats(rows, now_ms, cost_map, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
     heatmap = gw.heatmap(rows)
@@ -191,7 +199,7 @@ def build_state():
 
     # ---- 用注册表补充展示类数值指标 ----
     try:
-        quota_limit = gw.limit_for("monthly", applied_credits) or 60.0
+        quota_limit = gw.limit_for("monthly") or 60.0
         global_limit = quota_limit
         used_all = sum((x.get("cost_total") or 0.0) for x in stats)
         global_remain = max(0.0, global_limit - used_all)
@@ -323,22 +331,20 @@ def _latest_server_quota():
 
 
 def _apply_server_quota(windows, applied_credits=0):
-    """用官网 quota 覆盖本地百分比。官网 pct 已含信用扩容, 直接反推 used 并同步 limit/pct。"""
+    """用官网 quota 覆盖本地百分比。官方 pct 分母恒为基础额度, 直接反推 used 并同步 limit/pct。"""
     srv = _latest_server_quota()
     if not srv:
         return
     srv_map = {w["kind"]: w for w in srv}
-    credit = applied_credits * gw.CREDIT_PER_APPLIED
     for w in windows:
         sw = srv_map.get(w["kind"])
         if not sw:
             continue
-        base = gw.limit_for(w["kind"])          # 基础限额 12/30/60
-        limit = base + credit                    # 扩容后限额
-        used = limit * sw["pct"] / 100.0        # 官网 pct 反推用量（已含信用口径）
+        base = gw.limit_for(w["kind"])          # 基础限额 12/30/60 (分母恒定, credits 不扩容)
+        used = base * sw["pct"] / 100.0         # 官网 pct 反推用量
         pct = sw["pct"]                          # 直接采用官网 pct
         w["used"] = used
-        w["limit"] = limit
+        w["limit"] = base
         w["pct"] = pct
         w["reset"] = sw["reset_text"]
         w["calibrated"] = True

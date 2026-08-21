@@ -705,7 +705,8 @@ function fillModelList(el, key) {
       const usedCnt = x[key] || 0;
       const avgPerReq = x.avg_per_req != null ? x.avg_per_req : ((c > 0 && usedCnt > 0) ? c / usedCnt : (x.est_req_cost || 0));
       const modelQuota = (x.model_quota != null) ? x.model_quota : quotaLimit;
-      const modelUsed = (x.model_used != null ? x.model_used : c) * meterRatio(x.source);
+      const mRate = x.meter_rate != null ? x.meter_rate : meterRatio(x.source);
+      const modelUsed = (x.model_used != null ? x.model_used : c) * mRate;
       const modelRemain = Math.max(0, modelQuota - modelUsed);
       const globalRemain = Math.max(0, quotaLimit - usedAll);
       const effectiveRemain = x.effective_remain != null ? x.effective_remain : Math.min(modelRemain, globalRemain);
@@ -714,7 +715,7 @@ function fillModelList(el, key) {
       const pct = totalCnt > 0 ? Math.min(100, usedCnt / totalCnt * 100) : 0;
       main = usedCnt + "次";
       barPct = pct;
-      extra = `${fmtCost(c * meterRatio(x.source))}/${fmtCost(modelQuota)}`;
+      extra = `${fmtCost(c * mRate)}/${fmtCost(modelQuota)}`;
       if (effectiveRemain > 0 && remainCnt > 0) rem = `<span class="rem">剩${Math.round(remainCnt)}次</span>`;
     } else if (x.group === "go") {
       // go token 模式: 已使用 · 百分比 · 该模型总量(已用 + 剩余共享费用按本模型均价折算)
