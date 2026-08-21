@@ -325,7 +325,9 @@ class ViewEngine:
         self.is_free = is_free or (lambda m: False)
         self.local_tz = local_tz or datetime.now().astimezone().tzinfo
 
-    def rate_for(self, model):
+    def rate_for(self, model, src=None):
+        if src and src not in self.paid:
+            return 1.0
         return self.rates.get(self.norm(model), self.rate_default)
 
     def _day(self, ts):
@@ -424,7 +426,7 @@ class ViewEngine:
             to = tk.get("output", 0) or 0
             cache = tk.get("cache") or {}
             tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-            cost = (r.get("cost") or 0.0) * self.rate_for(r.get("model"))
+            cost = (r.get("cost") or 0.0) * self.rate_for(r.get("model"), r.get("src"))
             b = daily.setdefault(d, [0.0, 0, 0, 0, 0])
             b[0] += cost
             b[1] += 1

@@ -185,7 +185,7 @@ def build_state():
     _apply_server_quota(windows, applied_credits)
     # 行级折算率: 前端聚合/明细按模型折算 (v5 口径, 与总进度对账闭合)
     for r in rows:
-        r["rate"] = gw.rate_for(gw.norm_model(r.get("model") or ""))
+        r["rate"] = gw.rate_for(gw.norm_model(r.get("model") or ""), r.get("src"))
     stats = gw.model_stats(rows, now_ms, cost_map, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)

@@ -1,17 +1,14 @@
 {
-  "version": 5,
-  "source_note": "云端公式 v5 (来自 Cloudflare Worker)",
+  "version": 6,
+  "source_note": "云端公式 v6 (来自 Cloudflare Worker)",
   "params": {
     "meter": {
       "ratio": 1.4212,
       "mode": "per_model",
-      "rates": {
-        "deepseek-v4-pro": 3.69, "glm-5.2": 2.50, "kimi-k3": 0.94,
-        "gpt-5.6-luna": 0.72, "deepseek-v4-flash": 0.60
-      },
-      "rate_default": 0.56,
-      "rate_intercept": 0.21,
-      "note": "官方 used = intercept + Σ(模型消费×rate); pct分母=基础额度(60/30/12); credit=$5抵扣used不扩容分母 · 2026-08 拟合 RMSE=$0.16"
+      "rates": {},
+      "rate_default": 1.4212,
+      "rate_intercept": 0.0,
+      "note": "官方 used = Σ(消费×rate), rate 仅 go 来源生效; 终态锚定 49.2551×1.4212=70=60+5+5(两次抵扣用满); pct分母=基础额度(60/30/12); credit=$5抵扣used不扩容分母"
     },
     "limits": {
       "session": 12.0,

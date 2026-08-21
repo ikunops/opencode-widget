@@ -39,17 +39,18 @@ LIMITS = {"session": 12.0, "weekly": 30.0, "monthly": 60.0}
 # 每条 referral credit 抵扣 $5 已用量 (从 used 中减, 不改变分母; 是否已抵扣由账户实际使用决定)
 CREDIT_PER_APPLIED = 5.0
 
-# 分模型折算率: 官方把 $1 该模型消费换算成多少 $ used (2026-08 数据拟合 RMSE=$0.16)
-# 官方 used = RATE_INTERCEPT + Σ(模型消费 × rate); 云端公式 params.meter.rates 可覆盖
-MODEL_RATES = {
-    "deepseek-v4-pro": 3.69, "glm-5.2": 2.50, "kimi-k3": 0.94,
-    "gpt-5.6-luna": 0.72, "deepseek-v4-flash": 0.60,
-}
-RATE_DEFAULT = 0.56
-RATE_INTERCEPT = 0.21
+# 分模型折算率: 官方把该模型 $1 消费换算成多少 $ used (仅 go 来源生效)
+# 终态锚定: 8/14 两次抵扣用满 → used=70 = 49.2551×1.4212, 故全局统一 1.4212
+# 云端公式 params.meter.rates 可按模型覆盖
+MODEL_RATES = {}
+RATE_DEFAULT = 1.4212
+RATE_INTERCEPT = 0.0
 
 
-def rate_for(model):
+def rate_for(model, src=None):
+    """折算率: 仅官方付费来源(go)套用; 其他来源(本地网关估算等)保持原值。"""
+    if src and src != "go":
+        return 1.0
     return MODEL_RATES.get(model, RATE_DEFAULT)
 # 每个模型的月度使用额度 (官方"使用额度"列, 云端公式 model_quotas 可动态覆盖)
 MODEL_QUOTAS = {
@@ -496,7 +497,7 @@ def build_windows(rows, now_ms, applied_credits=0):
         c = r.get("cost") or 0.0
         if not c:
             return 0.0
-        return c * rate_for(norm_model(r["model"]))
+        return c * rate_for(norm_model(r["model"]), r.get("src"))
 
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
     rated_costs = [(r["ts"], rated(r)) for r in rows]
@@ -683,7 +684,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             "model_quota": model_quota,
             "model_used": model_used,
             "model_remain": model_remain,
-            "meter_rate": rate_for(m),
+            "meter_rate": rate_for(m, src),
             "sessions": s["sessions"],
             "prompts": s["prompts"],
             "days": len(s["days"]),
@@ -777,7 +778,7 @@ def model_history(rows, days=14):
         # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 不再统一归 go
         key = (m, src)
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
-        b[0] += (r["cost"] if r["cost"] is not None else 0.0) * rate_for(m)
+        b[0] += (r["cost"] if r["cost"] is not None else 0.0) * rate_for(m, src)
         b[1] += 1
         tk = r.get("tokens") or {}
         b[2] += tk.get("input", 0) or 0
@@ -819,7 +820,7 @@ def supplier_stats(rows):
         to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-        cost = (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]))
+        cost = (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         for key in (src, "all"):
             if key == "all" and src in SUBSET_SRCS:
@@ -858,7 +859,7 @@ def heatmap(rows, days=None):
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
         b = buckets.setdefault((d, src), [0.0, 0, 0, 0, 0])
-        b[0] += (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]))
+        b[0] += (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
         b[1] += 1
         b[2] += ti
         b[3] += to
