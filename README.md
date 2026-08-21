@@ -215,11 +215,27 @@ start "" electron\node_modules\electron\dist\electron.exe electron
 | **rate（速率）** | 本地 `usage_records` | `tok_sec_sum / tok_sec_n` | `formula_registry.py` → `go-usage-widget.py` |
 | **token 配额反推(前端)** | `model_quota` + 实际均价 | `used_tokens + remain_cost / avg_cost_per_token` | `formula_registry.py` → `data_server.py` → `index.html` |
 
-### 官方口径 vs 原始账单
+### 官方口径 vs 原始账单（v5 分模型折算率）
 
-- **原始账单 cost**：官方 API 返回的 `cost_summary` / `cost_map` 值（如 $49.2551），是未乘系数的值。
-- **官方口径 cost**：原始账单 × `meter.ratio`（当前 1.4212），用于**总用量/小屏主金额/剩余费用计算**。
-- **模型明细/曲线/tooltip**：保持原始账单成本，避免明细虚高。
+- **原始账单 cost**：官方 API 返回的 `cost_summary` / `cost_map` 值，是各模型实际消费金额。
+- **官方口径 used**：官方内部计价的"已用量"，与原始账单**不是线性关系**——每个模型有独立折算率：
+
+```
+官方 used = 0.21 + Σ( 模型消费 × 该模型折算率 )
+窗口进度% = ( used − 已用抵扣×$5 ) / 基础额度        ← 月60 / 周30 / 5h=12
+```
+
+- **分模型折算率**（2026-08 数据拟合，RMSE=$0.16；云端 `params.meter.rates` 可覆盖）：
+
+| 模型 | 折算率 | 模型 | 折算率 |
+|---|---|---|---|
+| deepseek-v4-pro | ×3.69 | gpt-5.6-luna | ×0.72 |
+| glm-5.2 | ×2.50 | deepseek-v4-flash | ×0.60 |
+| kimi-k3 | ×0.94 | 其他模型（默认） | ×0.56 |
+
+- **抵扣规则**：每条 referral credit 抵扣 $5 已用量（从 used 中减），**不扩容分母**——官方 pct 分母恒为基础额度 12/30/60。
+- **窗口定义**：月=滚动30天；周=周期首请求锚定（非滚动7天）；5h=5小时周期制。本地以滚动窗口近似，有官网抓取时被官方 pct 覆盖。
+- **模型明细/曲线/tooltip**：显示折算后金额（消费×折算率），与总进度可直接对账。
 
 ### 更新云端公式
 

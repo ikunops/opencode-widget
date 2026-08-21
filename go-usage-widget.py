@@ -777,7 +777,7 @@ def model_history(rows, days=14):
         # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 不再统一归 go
         key = (m, src)
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
-        b[0] += r["cost"] if r["cost"] is not None else 0.0
+        b[0] += (r["cost"] if r["cost"] is not None else 0.0) * rate_for(m)
         b[1] += 1
         tk = r.get("tokens") or {}
         b[2] += tk.get("input", 0) or 0
@@ -819,7 +819,7 @@ def supplier_stats(rows):
         to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-        cost = r.get("cost") or 0.0
+        cost = (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]))
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         for key in (src, "all"):
             if key == "all" and src in SUBSET_SRCS:
@@ -858,7 +858,7 @@ def heatmap(rows, days=None):
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
         b = buckets.setdefault((d, src), [0.0, 0, 0, 0, 0])
-        b[0] += r.get("cost") or 0.0
+        b[0] += (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]))
         b[1] += 1
         b[2] += ti
         b[3] += to

@@ -317,9 +317,16 @@ class ViewEngine:
         self.subset = self.sources.get("subset_of", {})
         self.paid = set(self.sources.get("paid", []))
         self.ratio = float(self.meter.get("ratio", 1.0))
+        # v5 分模型折算率: 官方 used = intercept + Σ(行消费 × rate)
+        self.rates = dict(self.meter.get("rates") or {})
+        self.rate_default = float(self.meter.get("rate_default", 1.0))
+        self.rate_intercept = float(self.meter.get("rate_intercept", 0.0))
         self.norm = norm or (lambda m: m)
         self.is_free = is_free or (lambda m: False)
         self.local_tz = local_tz or datetime.now().astimezone().tzinfo
+
+    def rate_for(self, model):
+        return self.rates.get(self.norm(model), self.rate_default)
 
     def _day(self, ts):
         return datetime.fromtimestamp(ts / 1000, self.local_tz).strftime("%Y-%m-%d")
@@ -417,7 +424,7 @@ class ViewEngine:
             to = tk.get("output", 0) or 0
             cache = tk.get("cache") or {}
             tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-            cost = r.get("cost") or 0.0
+            cost = (r.get("cost") or 0.0) * self.rate_for(r.get("model"))
             b = daily.setdefault(d, [0.0, 0, 0, 0, 0])
             b[0] += cost
             b[1] += 1
@@ -452,10 +459,11 @@ class ViewEngine:
     def _apply_post(self, view, totals, series):
         for op in view.get("post", []):
             if op.get("op") == "meterRatio":
+                # v5: 行级已按模型折算率累计, 这里只补全局截距 (不再乘全局 ratio)
                 scope = view.get("scope") or {}
                 hit = bool(scope.get("all")) or (scope.get("source") in self.paid)
                 if hit:
-                    totals["cost"] = round(totals["cost"] * self.ratio, 4)
+                    totals["cost"] = round(totals["cost"] + self.rate_intercept, 4)
             elif op.get("op") == "round4":
                 f = op.get("on", "cost")
                 totals[f] = round(totals.get(f, 0), 4)

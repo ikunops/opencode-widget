@@ -597,8 +597,7 @@ selModel = (withHist || cands[0] || state.stats[0]).key;
   if (state.server) {
     const cred = state.credits || 0;
     $("#calBadge").textContent = "服务端 ✓" + (cred > 0 ? ` · +$${(state.credits_dollars || 0).toFixed(0)}信用` : "");
-    const note = (FORMULA && FORMULA.params && FORMULA.params.meter && FORMULA.params.meter.note) ? FORMULA.params.meter.note : "计量器≈账单×1.42（≤限额）";
-    $("#footRight").textContent = note;
+    $("#footRight").textContent = "";
   } else {
     $("#calBadge").textContent = lastCal ? "已校准 ✓ " : "";
     $("#footRight").textContent = lastCal ? "" : "右键菜单";
@@ -684,7 +683,7 @@ function fillModelList(el, key) {
   const goStats = stats.filter(x => x.group === "go");
   const usedAll = (quotaWin && quotaWin.used != null && quotaWin.used > 0)
     ? quotaWin.used
-    : goStats.reduce((a, x) => a + costOf(x), 0);
+    : goStats.reduce((a, x) => a + costOf(x) * (x.meter_rate || 1), 0);
   const remainAll = Math.max(0, quotaLimit - usedAll);
   sorted.forEach(x => {
     const div = document.createElement("div");
@@ -901,8 +900,8 @@ const total = vals.reduce((a, v) => a + v, 0);
 const maxP = Math.max(...vals);
 const costTotal = pts.reduce((a, p) => a + (p.cost || 0), 0);
 const costMax = Math.max(...pts.map(p => p.cost || 0), 0);
-// 聚合分支：总量口径经 meterRatio(全部/go → ×RATIO; 子集明细 → 原始); 峰值始终原始
-const costStr = costTotal > 0 ? ` · $${(costTotal * meterRatio(selSupplier)).toFixed(2)} · 峰值 $${costMax.toFixed(2)}` : "";
+// 聚合分支: history series 后端已按模型折算率折算, 直接展示
+const costStr = costTotal > 0 ? ` · $${costTotal.toFixed(2)} · 峰值 $${costMax.toFixed(2)}` : "";
 title.textContent = `${totalName} · ${rngLabel} ${fmtTokens(total)} · 峰值 ${fmtV(maxP)}${costStr}`;
 const chartBox = $("#dChart");
 let tipEl = $("#chartTip");
@@ -953,7 +952,7 @@ state.history.find(h => h.key === selKey);
     const tot = (s.tokens_in || 0) + (s.tokens_out || 0) + (s.tokens_cache || 0);
     const cells = [
       ["总Token", fmtTokens(tot)],
-      ["费用", money((s.cost_total || 0) * meterRatio(s.source))],
+      ["费用", money((s.cost_total || 0) * (s.meter_rate || 1))],
       ["输入", fmtTokens(s.tokens_in || 0)],
       ["输出", fmtTokens(s.tokens_out || 0)],
       ["缓存", fmtTokens(s.tokens_cache || 0)],
@@ -1048,7 +1047,7 @@ state.history.find(h => h.key === selKey);
   const tokMax = Math.max(...pts.map(p => (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0)), 0);
   const costTotal = pts.reduce((a, p) => a + (p.cost || 0), 0);
   const costMax = Math.max(...pts.map(p => p.cost || 0), 0);
-  const costStr = isFree || costTotal <= 0 ? "" : ` · $${(costTotal * meterRatio(item.source)).toFixed(2)} · 峰值 $${(costMax * meterRatio(item.source)).toFixed(2)}`;
+  const costStr = isFree || costTotal <= 0 ? "" : ` · $${costTotal.toFixed(2)} · 峰值 $${costMax.toFixed(2)}`;
   title.textContent = `${item.name} · ${rngLabel} ${fmtTokens(tokTotal)} tok · 峰值 ${fmtTokens(tokMax)} tok${costStr}`;
 
   // 自定义 hover tooltip：划过任意日期显示当天 Token/次数/费用
@@ -1077,7 +1076,7 @@ state.history.find(h => h.key === selKey);
         const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
         html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
         html += `<div class="ct-row"><span>次数</span><b>${p.count || 0}</b></div>`;
-        html += `<div class="ct-row"><span>费用</span><b>${money((p.cost || 0) * meterRatio(item.source))}</b></div>`;
+        html += `<div class="ct-row"><span>费用</span><b>${money(p.cost || 0)}</b></div>`;
       } else {
         html += `<div class="ct-empty">无使用</div>`;
       }
@@ -1110,9 +1109,9 @@ function renderStats() {
   const periodLabel = isOverview ? "累计" : (mode === "weekly" ? "周" : mode === "monthly" ? "月" : "5h");
   const reqOf = x => (x.group === "free" && isOverview) ? (x.count_total || 0) : (x[key] || 0);
   const totalReq = st.reduce((a, x) => a + reqOf(x), 0);
-  const totalCost = st.reduce((a, x) => a + (x[costKey] || 0), 0);
+  const totalCost = st.reduce((a, x) => a + (x[costKey] || 0) * (x.meter_rate || 1), 0);
   const totalTok = st.reduce((a, x) => a + (x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0), 0);
-  [["请求数", totalReq + " 次"], [periodLabel + "费用", money(totalCost * meterRatio(selSupplier))], ["模型数", st.length + " 个"]].forEach(([k, v]) => {
+  [["请求数", totalReq + " 次"], [periodLabel + "费用", money(totalCost)], ["模型数", st.length + " 个"]].forEach(([k, v]) => {
     const div = document.createElement("div");
     div.className = "s-chip";
     div.innerHTML = `<div class="s-v">${v}</div><div class="s-k">${k}</div>`;
@@ -1225,10 +1224,10 @@ function renderSmall() {
   const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
   const all = vAllAll ? vAllAll.totals : allAgg();
   const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
-  const rangeCost = vRange ? (rangeAgg.cost || 0) : (aggForRange(timeRange).cost * meterRatio(selSupplier));
+  const rangeCost = rangeAgg.cost || 0;
   $("#sLabel").textContent = "总用量 · " + TIME_RANGE_LABEL[timeRange];
   $("#sAmount").textContent = money(rangeCost);
-  const subCost = vAll ? (agg.cost || 0) : (agg.cost * meterRatio(selSupplier));
+  const subCost = agg.cost || 0;
   $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(subCost) + " $ " + agg.count + "次" : "";
   $("#sSupplier").textContent = selSupplier ? supName(selSupplier) : "全部";
 // 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
@@ -1250,7 +1249,7 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
   if (mstats) {
     if (curModel) {
       const mTok = (curModel.tokens_in || 0) + (curModel.tokens_out || 0) + (curModel.tokens_cache || 0);
-      const mCost = (curModel.cost_total || 0) * meterRatio(src === "all" ? null : src);
+      const mCost = (curModel.cost_total || 0) * (curModel.meter_rate || 1);
       const hit = (curModel.cache_hit || 0).toFixed(1) + "%";
       const sess = (curModel.sessions || 0) + " 个";
       mstats.innerHTML =
@@ -1275,7 +1274,7 @@ curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total ||
   }
   const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
   const gAgg = rangeAgg;
-  const gridCost = (vRange || vAll) ? (gAgg.cost || 0) : (gAgg.cost * meterRatio(selSupplier));
+  const gridCost = gAgg.cost || 0;
   const rows = [
     ["总Token", fmtTokens(gAgg.tokens)],
     ["总费用", money(gridCost)],
@@ -1366,7 +1365,7 @@ render();
   if (row) {
     const cards = [
       ["总Token", fmtTokens(agg.tokens)],
-      ["总费用", money(agg.cost * meterRatio(src === "all" ? null : src))],
+      ["总费用", money(agg.cost)],
       ["请求数", (agg.count || 0) + " 次"],
       ["输入", fmtTokens(agg.input)],
       ["输出", fmtTokens(agg.output)],
@@ -1414,7 +1413,7 @@ render();
       if (!date) { h += `<div class="heat-cell" style="background:transparent"></div>`; continue; }
       const v = byDate[date];
       const col = v ? heatColor(v.tokens, maxV) : HEAT_COLORS[0];
-      const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${(v.cost * meterRatio(src === "all" ? null : src)).toFixed(4)}` : date + " · 无使用";
+      const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${(v.cost || 0).toFixed(4)}` : date + " · 无使用";
       h += `<div class="heat-cell" title="${tip}" style="background:${col}"></div>`;
     }
     h += `</div>`;
