@@ -321,6 +321,8 @@ class ViewEngine:
         self.rates = dict(self.meter.get("rates") or {})
         self.rate_default = float(self.meter.get("rate_default", 1.0))
         self.rate_intercept = float(self.meter.get("rate_intercept", 0.0))
+        # 动态抵扣总额 = 抵扣次数 × $5, 由宿主(data_server)按账户实际状态注入
+        self.credit_deduct = 0.0
         self.norm = norm or (lambda m: m)
         self.is_free = is_free or (lambda m: False)
         self.local_tz = local_tz or datetime.now().astimezone().tzinfo
@@ -461,11 +463,12 @@ class ViewEngine:
     def _apply_post(self, view, totals, series):
         for op in view.get("post", []):
             if op.get("op") == "meterRatio":
-                # v5: 行级已按模型折算率累计, 这里只补全局截距 (不再乘全局 ratio)
+                # v6: 行级已按折算率累计, 这里补截距; 全周期视图再减动态抵扣(次数×$5)
                 scope = view.get("scope") or {}
                 hit = bool(scope.get("all")) or (scope.get("source") in self.paid)
                 if hit:
-                    totals["cost"] = round(totals["cost"] + self.rate_intercept, 4)
+                    deduct = self.credit_deduct if (view.get("range") == "all") else 0.0
+                    totals["cost"] = round(max(0.0, totals["cost"] + self.rate_intercept - deduct), 4)
             elif op.get("op") == "round4":
                 f = op.get("on", "cost")
                 totals[f] = round(totals.get(f, 0), 4)

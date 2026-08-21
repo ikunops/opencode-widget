@@ -493,14 +493,15 @@ def month_bounds(now_ms, subscribe_ms):
 
 def build_windows(rows, now_ms, applied_credits=0):
     # 折算口径: 每条消费按模型折算率换算成官方 used (官方 pct 分母=基础额度)
+    # gateway 等 go 子集来源是同一消耗的本地镜像, 排除避免双计 (与 supplier_stats "all" 口径一致)
+    def counted(r):
+        return (r.get("cost") or 0.0) > 0 and r.get("src") not in SUBSET_SRCS
+
     def rated(r):
-        c = r.get("cost") or 0.0
-        if not c:
-            return 0.0
-        return c * rate_for(norm_model(r["model"]), r.get("src"))
+        return r["cost"] * rate_for(norm_model(r["model"]), r.get("src"))
 
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
-    rated_costs = [(r["ts"], rated(r)) for r in rows]
+    rated_costs = [(r["ts"], rated(r)) for r in rows if counted(r)]
     paid = [(t, c) for t, c in costs if c]
     earliest = min((t for t, _ in paid), default=now_ms)
 
@@ -519,8 +520,11 @@ def build_windows(rows, now_ms, applied_credits=0):
 
     def mk(kind, used, reset_ms):
         limit = limit_for(kind)
-        pct = min(100.0, max(0.0, used / limit * 100)) if limit else 0.0
-        return {"kind": kind, "used": used, "limit": limit, "pct": pct, "reset": reset_ms}
+        # 动态抵扣: used 减去 抵扣次数×$5 (不改变分母)
+        net = max(0.0, used - deduct_for(applied_credits))
+        pct = min(100.0, max(0.0, net / limit * 100)) if limit else 0.0
+        return {"kind": kind, "used": net, "limit": limit, "pct": pct,
+                "gross_used": used, "deduct": deduct_for(applied_credits), "reset": reset_ms}
 
     return [
         mk("session", s_used, s_reset),

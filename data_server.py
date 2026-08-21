@@ -123,6 +123,8 @@ def get_formula(force=False):
         _FORMULA_ENGINE = vw.ViewEngine(f, norm=gw.norm_model,
                                         is_free=gw.is_free_model,
                                         local_tz=gw.LOCAL_TZ)
+        # 动态抵扣: 抵扣次数 × $5 (账户实际已应用的 credit 数)
+        _FORMULA_ENGINE.credit_deduct = gw.deduct_for(_applied_credits())
     return f
 
 
@@ -189,6 +191,12 @@ def build_state():
     stats = gw.model_stats(rows, now_ms, cost_map, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
+    # 动态抵扣: go/all 汇总减 抵扣次数×$5 (与窗口/视图口径一致)
+    deduct_total = gw.deduct_for(applied_credits)
+    for key in ("go", "all"):
+        if key in suppliers and suppliers[key].get("cost"):
+            suppliers[key]["cost"] = max(0.0, suppliers[key]["cost"] - deduct_total)
+            suppliers[key]["deduct"] = deduct_total
     heatmap = gw.heatmap(rows)
 
     cfg = {}
