@@ -1224,7 +1224,12 @@ function renderSmall() {
   const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
   const all = vAllAll ? vAllAll.totals : allAgg();
   const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
-  const rangeCost = rangeAgg.cost || 0;
+  let rangeCost = rangeAgg.cost || 0;
+  // 全量回退路径(前端聚合)与后端 view 口径对齐: 减动态抵扣; view 缓存已减不重复
+  if (!vRange && timeRange === "all" && (src === "all" || src === "go")) {
+    const md = win("monthly");
+    rangeCost = Math.max(0, rangeCost - ((md && md.deduct) || 0));
+  }
   $("#sLabel").textContent = "总用量 · " + TIME_RANGE_LABEL[timeRange];
   $("#sAmount").textContent = money(rangeCost);
   const subCost = agg.cost || 0;
@@ -1360,6 +1365,11 @@ render();
       agg.days.add(x.date);
     });
     agg.days = agg.days.size;
+    // 全周期累计与官方口径对齐: 减动态抵扣(次数×$5); 短范围/单模型不减
+    if ((src === "all" || src === "go") && heatRange === "all") {
+      const md = win("monthly");
+      agg.cost = Math.max(0, agg.cost - ((md && md.deduct) || 0));
+    }
   }
   const row = $("#dStatsRow");
   if (row) {
