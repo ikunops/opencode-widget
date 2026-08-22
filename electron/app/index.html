@@ -828,17 +828,20 @@ return;
 const item = { series: aggSeries, is_free: true, name: totalName + " · 全部模型" };
 const selKey = "";
 const statItem = null;
-const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
-let pts = item.series;
-if (days > 0) {
-const cut = new Date();
-cut.setUTCHours(0, 0, 0, 0);
-if (days > 1) cut.setUTCDate(cut.getUTCDate() - (days - 1));
-const cutoffStr = cut.toISOString().slice(0, 10);
-pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
-}
+const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 0 : 0;
+  let pts = item.series;
+  if (days > 0) {
+    const cut = new Date();
+    cut.setUTCHours(0, 0, 0, 0);
+    if (days > 1) cut.setUTCDate(cut.getUTCDate() - (days - 1));
+    const cutoffStr = cut.toISOString().slice(0, 10);
+    pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
+  } else if (heatRange === "30") {
+    const cutoffStr = periodStartStr();
+    pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
+  }
 if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
-const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
+const rngLabel = heatRange === "all" ? "全部" : heatRange === "30" ? "本期" : `近 ${heatRange} 天`;
 if (note) note.textContent = `${rngLabel} Token(含缓存)`;
 const W = 400, H = 180, PAD_L = 42, PAD_B = 18, PAD_T = 10, PAD_R = 12;
 const vals = pts.map(p => (p.tokens || 0));
@@ -969,7 +972,7 @@ state.history.find(h => h.key === selKey);
   if (!item || !item.series.length) { svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = ""; return; }
   const isFree = !!item.is_free;
   // 跟随右上角天数: 1(今天)/7/30/all, 与热力图语义一致 (UTC 当天 0 点起)
-  const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 30 : 0;
+  const days = heatRange === "1" ? 1 : heatRange === "7" ? 7 : heatRange === "30" ? 0 : 0;
   let pts = item.series;
   if (days > 0) {
     const cut = new Date();
@@ -977,9 +980,12 @@ state.history.find(h => h.key === selKey);
     if (days > 1) cut.setUTCDate(cut.getUTCDate() - (days - 1));
     const cutoffStr = cut.toISOString().slice(0, 10);
     pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
+  } else if (heatRange === "30") {
+    const cutoffStr = periodStartStr();
+    pts = pts.filter(p => String(p.date).length === 10 && p.date >= cutoffStr);
   }
   if (!pts.length) { svg.innerHTML = ""; title.textContent = "该范围暂无数据"; if (note) note.textContent = ""; return; }
-  const rngLabel = heatRange === "all" ? "全部" : `近 ${heatRange} 天`;
+  const rngLabel = heatRange === "all" ? "全部" : heatRange === "30" ? "本期" : `近 ${heatRange} 天`;
   if (note) note.textContent = isFree ? `${rngLabel} Token(含缓存)` : `${rngLabel} Token(含缓存) · 费用(USD)`;
   const W = 400, H = 180, PAD_L = 42, PAD_B = 18, PAD_T = 10, PAD_R = 12;
   const vals = pts.map(p => isFree ? (p.tokens_in + p.tokens_out + p.tokens_cache) : p.cost);
@@ -1170,6 +1176,15 @@ const TIME_RANGE_LABEL = { today: "今天", "7": "近7天", all: "全部" };
 const VIEW_RANGE = { today: "today", "7": "7d", "30": "30d", all: "all" };
 const viewIdFor = (src, range) => `${src || "all"}_${VIEW_RANGE[range] || range}`;
 
+// 本期起始日期: 订阅周期起点 (state.period_start), 未知时回退字面30天
+function periodStartStr() {
+  if (state.period_start) return state.period_start;
+  const c = new Date();
+  c.setUTCHours(0, 0, 0, 0);
+  c.setUTCDate(c.getUTCDate() - 29);
+  return c.toISOString().slice(0, 10);
+}
+
 // 大屏: 具体模型 + 时间范围 (heatRange: 1|7|30|all) 的聚合, 供统计卡/热力图跟随模型选择
 function modelAggForRange(key, range) {
   const agg = { tokens: 0, cost: 0, count: 0, input: 0, output: 0, cache: 0, days: 0 };
@@ -1178,10 +1193,10 @@ function modelAggForRange(key, range) {
   const daySet = new Set();
   const cut = (() => {
     if (range === "all") return "";
+    if (range === "30") return periodStartStr();
     const c = new Date();
     c.setUTCHours(0, 0, 0, 0);
     if (range === "7") c.setUTCDate(c.getUTCDate() - 6);
-    else if (range === "30") c.setUTCDate(c.getUTCDate() - 29);
     return c.toISOString().slice(0, 10);
   })();
   (h.series || []).forEach(p => {
@@ -1224,12 +1239,7 @@ function renderSmall() {
   const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
   const all = vAllAll ? vAllAll.totals : allAgg();
   const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
-  let rangeCost = rangeAgg.cost || 0;
-  // 全量回退路径(前端聚合)与后端 view 口径对齐: 减动态抵扣; view 缓存已减不重复
-  if (!vRange && timeRange === "all" && (src === "all" || src === "go")) {
-    const md = win("monthly");
-    rangeCost = Math.max(0, rangeCost - ((md && md.deduct) || 0));
-  }
+  const rangeCost = rangeAgg.cost || 0;
   $("#sLabel").textContent = "总用量 · " + TIME_RANGE_LABEL[timeRange];
   $("#sAmount").textContent = money(rangeCost);
   const subCost = agg.cost || 0;
@@ -1332,7 +1342,7 @@ render();
   // ---- 时间范围 ----
   const range = $("#dRange");
   if (range) {
-    range.innerHTML = [["1", "今天"], ["7", "7天"], ["30", "30天"], ["all", "全部"]]
+    range.innerHTML = [["1", "今天"], ["7", "7天"], ["30", "本期"], ["all", "全部"]]
       .map(([v, n]) => `<button class="r-btn${heatRange === v ? " on" : ""}" data-r="${v}">${n}</button>`).join("");
     range.querySelectorAll(".r-btn").forEach(b => {
       b.onclick = () => { heatRange = b.dataset.r; render(); };
@@ -1344,10 +1354,14 @@ render();
     ? !SUBSET_SRCS.includes(x.src)
     : x.src === src);
   const nowD = new Date();
-  const startD = new Date(nowD);
+  let startD = new Date(nowD);
   if (heatRange === "1") startD.setUTCHours(0, 0, 0, 0);
   else if (heatRange === "7") startD.setUTCDate(startD.getUTCDate() - 6);
-  else if (heatRange === "30") startD.setUTCDate(startD.getUTCDate() - 29);
+  else if (heatRange === "30") {
+    // 本期 = 当前订阅周期起始 (state.period_start), 订阅日未知时回退字面30天
+    if (state.period_start) startD = new Date(state.period_start + "T00:00:00Z");
+    else startD.setUTCDate(startD.getUTCDate() - 29);
+  }
   const startDate = heatRange === "all" ? "" : startD.toISOString().slice(0, 10);
   let agg;
   if (isModelSel) {
@@ -1365,10 +1379,9 @@ render();
       agg.days.add(x.date);
     });
     agg.days = agg.days.size;
-    // 全周期累计与官方口径对齐: 减动态抵扣(次数×$5); 短范围/单模型不减
-    if ((src === "all" || src === "go") && heatRange === "all") {
-      const md = win("monthly");
-      agg.cost = Math.max(0, agg.cost - ((md && md.deduct) || 0));
+    // "本期"与官方进度口径对齐: 减本期抵扣(次数×$5); 全部=全览统计不减; 短范围/单模型不减
+    if ((src === "all" || src === "go") && heatRange === "30") {
+      agg.cost = Math.max(0, agg.cost - (state.period_deduct || 0));
     }
   }
   const row = $("#dStatsRow");

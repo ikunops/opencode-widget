@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import threading
 import time
+import datetime
 import importlib.util
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -165,6 +166,13 @@ def build_state():
     except Exception:
         pass
     applied_credits = _applied_credits()
+    period_start = _subscription_start()
+    period_deduct = _period_deduct(period_start)
+    # 引擎注入订阅周期: "本期"(30d档) 截止=订阅日, 抵扣仅本期视图
+    with _FORMULA_LOCK:
+        if _FORMULA_ENGINE is not None:
+            _FORMULA_ENGINE.period_start_ms = period_start
+            _FORMULA_ENGINE.credit_deduct = period_deduct
     try:
         rows, cost_map = _collect_rows()
     except Exception:
@@ -182,7 +190,7 @@ def build_state():
         models = 0
         all_go_models = []
 
-    windows = gw.build_windows(rows, now_ms, applied_credits=applied_credits)
+    windows = gw.build_windows(rows, now_ms, applied_credits=applied_credits, period_start=period_start)
     _apply_calibration(windows)
     _apply_server_quota(windows, applied_credits)
     # 行级折算率: 前端聚合/明细按模型折算 (v5 口径, 与总进度对账闭合)
@@ -191,12 +199,7 @@ def build_state():
     stats = gw.model_stats(rows, now_ms, cost_map, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
-    # 动态抵扣: go/all 汇总减 抵扣次数×$5 (与窗口/视图口径一致)
-    deduct_total = gw.deduct_for(applied_credits)
-    for key in ("go", "all"):
-        if key in suppliers and suppliers[key].get("cost"):
-            suppliers[key]["cost"] = max(0.0, suppliers[key]["cost"] - deduct_total)
-            suppliers[key]["deduct"] = deduct_total
+    # "全部/全览"= 所有周期累计统计, 不减抵扣 (抵扣仅"本期"视图体现)
     heatmap = gw.heatmap(rows)
 
     cfg = {}
@@ -270,6 +273,8 @@ def build_state():
         "server": srv,
         "credits": applied_credits,
         "credits_dollars": round(applied_credits * gw.CREDIT_PER_APPLIED, 2),
+        "period_start": datetime.datetime.fromtimestamp(period_start / 1000).strftime("%Y-%m-%d") if period_start else "",
+        "period_deduct": round(period_deduct, 2),
         "server_error": None,
         "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
         "ts": now_ms,
@@ -295,6 +300,36 @@ def _applied_credits():
         except Exception:
             return 0
     return 0
+
+
+_SUB_START = {"ms": None, "ts": 0}
+
+
+def _subscription_start():
+    """当前订阅周期起始(ms)。自动抓取 /billing 页付款记录(缓存6h),
+    失败回退 config.subscription.start, 再回退 0。"""
+    now = time.time()
+    if _SUB_START["ms"] is not None and now - _SUB_START["ts"] < 6 * 3600:
+        return _SUB_START["ms"]
+    ms = None
+    if ur is not None:
+        try:
+            cfg = gw.load_config()
+            srv = cfg.get("server") or {}
+            ms = ur.fetch_subscription_start(srv.get("auth_cookie") or "", srv.get("workspace_id") or "")
+        except Exception:
+            ms = None
+    _SUB_START["ms"] = ms if ms else gw.subscription_start_ms()
+    _SUB_START["ts"] = now
+    return _SUB_START["ms"]
+
+
+def _period_deduct(start_ms):
+    """本期抵扣总额 = 本期抵扣次数 × $5; 无抵扣表时回退 applied_credits。"""
+    cnt = gw.period_deduct_count(start_ms)
+    if not cnt:
+        cnt = _applied_credits()
+    return gw.deduct_for(cnt)
 
 
 def _apply_calibration(windows):

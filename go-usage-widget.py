@@ -52,6 +52,42 @@ def rate_for(model, src=None):
     if src and src != "go":
         return 1.0
     return MODEL_RATES.get(model, RATE_DEFAULT)
+
+
+def subscription_start_ms(override_ms=None):
+    """当前订阅周期起始(毫秒)。优先级: 调用方注入 > config.subscription.start > 0(全历史)。"""
+    if override_ms is not None:
+        return int(override_ms)
+    try:
+        cfg = load_config()
+        s = (cfg.get("subscription") or {}).get("start")
+        if s:
+            return int(datetime.fromisoformat(str(s)).timestamp() * 1000)
+    except Exception:
+        pass
+    return 0
+
+
+def period_deduct_count(start_ms):
+    """本期已应用抵扣次数: credit_deductions 表中 date ≥ 订阅日的 count 之和;
+    表为空/无匹配时回退 sync_meta 的 applied_credits。"""
+    try:
+        cfg = load_config()
+        table = cfg.get("credit_deductions") or []
+        if table:
+            total = 0
+            for item in table:
+                try:
+                    d = item.get("date") or item.get("d")
+                    c = int(item.get("count") or item.get("c") or 0)
+                    if d and int(datetime.fromisoformat(str(d)).timestamp() * 1000) >= start_ms:
+                        total += c
+                except Exception:
+                    continue
+            return total
+    except Exception:
+        pass
+    return 0
 # 每个模型的月度使用额度 (官方"使用额度"列, 云端公式 model_quotas 可动态覆盖)
 MODEL_QUOTAS = {
     "grok-4.5": 15, "gpt-5.6-luna": 15, "glm-5.2": 60, "glm-5.1": 60,
@@ -491,7 +527,7 @@ def month_bounds(now_ms, subscribe_ms):
     return int(start.timestamp() * 1000), int(anchored(ey, em).timestamp() * 1000)
 
 
-def build_windows(rows, now_ms, applied_credits=0):
+def build_windows(rows, now_ms, applied_credits=0, period_start=0):
     # 折算口径: 每条消费按模型折算率换算成官方 used (官方 pct 分母=基础额度)
     # gateway 等 go 子集来源是同一消耗的本地镜像, 排除避免双计 (与 supplier_stats "all" 口径一致)
     def counted(r):
@@ -508,6 +544,9 @@ def build_windows(rows, now_ms, applied_credits=0):
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
     ms, me = month_bounds(now_ms, earliest)
+    # 月度本地估算窗口 = 本订阅周期起 (订阅日至今); 官方抓取时被 _apply_server_quota 覆盖
+    if period_start and period_start > ms:
+        ms = period_start
 
     # 注: 官方周窗口为周期首请求锚定制、5h 窗口为周期制; 本地以滚动窗口近似,
     # 有官网抓取时 _apply_server_quota 会用官方 pct 覆盖。
@@ -520,11 +559,12 @@ def build_windows(rows, now_ms, applied_credits=0):
 
     def mk(kind, used, reset_ms):
         limit = limit_for(kind)
-        # 动态抵扣: used 减去 抵扣次数×$5 (不改变分母)
-        net = max(0.0, used - deduct_for(applied_credits))
+        # 动态抵扣: used 减去 本期抵扣次数×$5 (不改变分母)
+        deduct = deduct_for(period_deduct_count(period_start) if period_start else applied_credits)
+        net = max(0.0, used - deduct)
         pct = min(100.0, max(0.0, net / limit * 100)) if limit else 0.0
         return {"kind": kind, "used": net, "limit": limit, "pct": pct,
-                "gross_used": used, "deduct": deduct_for(applied_credits), "reset": reset_ms}
+                "gross_used": used, "deduct": deduct, "reset": reset_ms}
 
     return [
         mk("session", s_used, s_reset),

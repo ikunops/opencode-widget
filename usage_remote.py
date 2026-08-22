@@ -520,6 +520,32 @@ def read_remote_latest_fetched_at():
         return 0
 
 
+def fetch_subscription_start(auth_cookie, workspace_id, timeout=15):
+    """从 /workspace/{id}/billing 页面内嵌的付款记录解析最近一次订阅时间。
+
+    页面里每条付款形如 {id:"pay_...",timeCreated:new Date("..."),...};
+    最新一条 timeCreated 即最近订阅起始时刻。失败返回 None。"""
+    if not auth_cookie or not workspace_id:
+        return None
+    try:
+        url = "https://opencode.ai/workspace/%s/billing" % workspace_id
+        req = Request(url, headers={
+            "Cookie": "auth=%s" % auth_cookie,
+            "User-Agent": USER_AGENT,
+        })
+        with urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        stamps = []
+        for m in re.finditer(r'\{id:"pay_[^}]*?timeCreated:\$R\[\d+\]=new Date\("([^"]+)"\)', body):
+            stamps.append(m.group(1))
+        if not stamps:
+            return None
+        latest = max(stamps)
+        return int(datetime.fromisoformat(latest.replace("Z", "+00:00")).timestamp() * 1000)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Full sync entry
 # ---------------------------------------------------------------------------

@@ -323,6 +323,8 @@ class ViewEngine:
         self.rate_intercept = float(self.meter.get("rate_intercept", 0.0))
         # 动态抵扣总额 = 抵扣次数 × $5, 由宿主(data_server)按账户实际状态注入
         self.credit_deduct = 0.0
+        # 当前订阅周期起始(ms): "本期"(30d档) 的截止锚点, 由宿主注入
+        self.period_start_ms = 0
         self.norm = norm or (lambda m: m)
         self.is_free = is_free or (lambda m: False)
         self.local_tz = local_tz or datetime.now().astimezone().tzinfo
@@ -335,16 +337,19 @@ class ViewEngine:
     def _day(self, ts):
         return datetime.fromtimestamp(ts / 1000, self.local_tz).strftime("%Y-%m-%d")
 
-    @staticmethod
-    def _cutoff(rng):
+    def _cutoff(self, rng):
         r = _RANGES.get(rng or "all")
         if r is None or r == "all":
             return None
+        if r == "30d":
+            # "本期": 截止 = 当前订阅周期起始 (订阅日); 订阅日未知时回退字面30天
+            if self.period_start_ms:
+                return datetime.fromtimestamp(self.period_start_ms / 1000, timezone.utc).strftime("%Y-%m-%d")
+            today = datetime.now(timezone.utc) - timedelta(days=29)
+            return today.strftime("%Y-%m-%d")
         today = datetime.now(timezone.utc)
         if r == "7d":
             today = today - timedelta(days=6)
-        elif r == "30d":
-            today = today - timedelta(days=29)
         return today.strftime("%Y-%m-%d")
 
     def resolve_view(self, vid):
@@ -463,11 +468,11 @@ class ViewEngine:
     def _apply_post(self, view, totals, series):
         for op in view.get("post", []):
             if op.get("op") == "meterRatio":
-                # v6: 行级已按折算率累计, 这里补截距; 全周期视图再减动态抵扣(次数×$5)
+                # v6: 行级已按折算率累计, 这里补截距; 仅"本期"(30d档)视图减动态抵扣(次数×$5)
                 scope = view.get("scope") or {}
                 hit = bool(scope.get("all")) or (scope.get("source") in self.paid)
                 if hit:
-                    deduct = self.credit_deduct if (view.get("range") == "all") else 0.0
+                    deduct = self.credit_deduct if (view.get("range") in ("30d", "30")) else 0.0
                     totals["cost"] = round(max(0.0, totals["cost"] + self.rate_intercept - deduct), 4)
             elif op.get("op") == "round4":
                 f = op.get("on", "cost")
