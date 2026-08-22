@@ -532,7 +532,7 @@ function displayWindows() {
     const keys = ["session", "weekly", "monthly"];
     return state.server.map((w, i) => {
       const local = state.windows.find(x => x.kind === keys[i]);
-      return { kind: keys[i], used: local ? local.used : null, limit: local ? local.limit : [12,30,60][i], pct: local ? local.pct : w.pct, reset: (local || {}).reset || 0, reset_text: w.reset_text || "", server: true };
+      return { kind: keys[i], used: local ? local.used : null, limit: local ? local.limit : [12,30,60][i], pct: local ? local.pct : w.pct, reset: (local || {}).reset || 0, reset_text: w.reset_text || "", deduct: (local || {}).deduct || 0, gross_used: (local || {}).gross_used || 0, server: true };
     });
   }
   return state.windows;
