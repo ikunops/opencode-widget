@@ -166,17 +166,19 @@ def build_state():
     except Exception:
         pass
     applied_credits = _applied_credits()
-    period_start = _subscription_start()
+    try:
+        rows, cost_map = _collect_rows()
+    except Exception:
+        rows, cost_map = [], {}
+    # 最早付费消费时间: 订阅日合理性校验用 (订阅后才会消费)
+    earliest_ms = min((r["ts"] for r in rows if r.get("cost")), default=0)
+    period_start = _subscription_start(earliest_ms)
     period_deduct = _period_deduct(period_start)
     # 引擎注入订阅周期: "本期"(30d档) 截止=订阅日, 抵扣仅本期视图
     with _FORMULA_LOCK:
         if _FORMULA_ENGINE is not None:
             _FORMULA_ENGINE.period_start_ms = period_start
             _FORMULA_ENGINE.credit_deduct = period_deduct
-    try:
-        rows, cost_map = _collect_rows()
-    except Exception:
-        rows, cost_map = [], {}
     try:
         key = _effective_key()
         key_ok = bool(key)
@@ -275,6 +277,8 @@ def build_state():
         "credits_dollars": round(applied_credits * gw.CREDIT_PER_APPLIED, 2),
         "period_start": datetime.datetime.fromtimestamp(period_start / 1000).strftime("%Y-%m-%d") if period_start else "",
         "period_deduct": round(period_deduct, 2),
+        "subscription_source": _SUB_START.get("source", "none"),
+        "subscription_fetched_at": _SUB_START.get("fetched_at", 0),
         "server_error": None,
         "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
         "ts": now_ms,
@@ -302,15 +306,37 @@ def _applied_credits():
     return 0
 
 
-_SUB_START = {"ms": None, "ts": 0}
+_SUB_START = {"ms": None, "ts": 0, "last_day": "", "source": "none", "fetched_at": 0}
+# 到期窗口: 距上次订阅日 ≥ 30 天后, 每天强制抓取 1 次直到抓到新订阅记录
+_SUB_DAILY_WINDOW_S = 30 * 24 * 3600
+_SUB_TTL_OK_S = 6 * 3600
+_SUB_TTL_FAIL_S = 15 * 60
 
 
-def _subscription_start():
-    """当前订阅周期起始(ms)。自动抓取 /billing 页付款记录(缓存6h),
-    失败回退 config.subscription.start, 再回退 0。"""
+def _subscription_start(earliest_ms=0):
+    """当前订阅周期起始(ms)。调度策略:
+    - 正常期(距订阅日 < 30天): 成功抓取缓存 6h, 失败 15min 重试
+    - 到期窗口(≥ 30天): 每天强制抓 1 次(当天去重), 直到抓到新订阅记录
+    - 抓到新值→重置计时; 抓取失败→config 兜底; 合理性校验: 订阅日不晚于今天、
+      且不晚于最早消费日(订阅后才会消费)"""
+    global _SUB_START
     now = time.time()
-    if _SUB_START["ms"] is not None and now - _SUB_START["ts"] < 6 * 3600:
-        return _SUB_START["ms"]
+    if _SUB_START["ms"] is None:
+        _SUB_START["ms"] = gw.subscription_start_ms()
+        if _SUB_START["ms"]:
+            _SUB_START["source"] = "config"
+    cur = _SUB_START["ms"]
+    in_daily = bool(cur) and (now - cur / 1000.0) >= _SUB_DAILY_WINDOW_S
+    today = datetime.date.today().isoformat()
+    if cur is not None:
+        if in_daily:
+            if _SUB_START["last_day"] == today and _SUB_START["source"] == "auto":
+                return _SUB_START["ms"]
+        else:
+            ttl = _SUB_TTL_OK_S if _SUB_START["source"] == "auto" else _SUB_TTL_FAIL_S
+            if now - _SUB_START["ts"] < ttl:
+                return _SUB_START["ms"]
+    # 抓取最新订阅付款记录
     ms = None
     if ur is not None:
         try:
@@ -319,8 +345,29 @@ def _subscription_start():
             ms = ur.fetch_subscription_start(srv.get("auth_cookie") or "", srv.get("workspace_id") or "")
         except Exception:
             ms = None
-    _SUB_START["ms"] = ms if ms else gw.subscription_start_ms()
+    if ms:
+        ok = ms <= int(now * 1000)
+        # 订阅日不应晚于最早消费日; 容忍同日先后误差(付款/记录时区偏差)±1天
+        if earliest_ms and ms > earliest_ms + 24 * 3600 * 1000:
+            ok = False
+        if ok:
+            _SUB_START["ms"] = ms
+            _SUB_START["ts"] = now
+            _SUB_START["last_day"] = today
+            _SUB_START["source"] = "auto"
+            _SUB_START["fetched_at"] = int(now * 1000)
+            print("[subscription] auto: %s (source=billing)" %
+                  datetime.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d"))
+            return _SUB_START["ms"]
+    # 抓取失败: 回退 config; 到期窗口内当天不再重试(明天再抓)
+    fb = gw.subscription_start_ms()
+    _SUB_START["ms"] = fb if fb else _SUB_START["ms"]
     _SUB_START["ts"] = now
+    _SUB_START["last_day"] = today
+    _SUB_START["source"] = "config" if fb else "none"
+    if not fb:
+        _SUB_START["source"] = "none" if not _SUB_START["ms"] else "auto_stale"
+    print("[subscription] fallback: source=%s (fetch failed)" % _SUB_START["source"])
     return _SUB_START["ms"]
 
 
