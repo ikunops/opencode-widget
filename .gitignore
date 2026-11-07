@@ -1,6 +1,7 @@
 # 本地运行产物 / 敏感数据
 webdata/
 logs/
+runtime/
 __pycache__/
 *.log
 server_usage.db

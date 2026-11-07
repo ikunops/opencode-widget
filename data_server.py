@@ -12,6 +12,7 @@ import threading
 import time
 import datetime
 import bisect
+import secrets
 import importlib.util
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,23 @@ import formula_registry as fr
 
 PORT = 8765
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
+
+# ---- 本地 API 鉴权 ----
+# 任意网页都能访问 127.0.0.1:8765，因此所有 /api/* 请求必须携带本进程生成的随机 token；
+# token 写入 runtime/token.txt，仅由 Electron preload 读取后注入请求头，
+# 浏览器上下文无法读取本地文件，从而阻止跨站读取 Cookie / API Key。
+TOKEN_FILE = os.path.join(APP_DIR, "runtime", "token.txt")
+
+
+def _init_token():
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    tok = secrets.token_urlsafe(32)
+    with open(TOKEN_FILE, "w", encoding="utf-8") as fh:
+        fh.write(tok)
+    return tok
+
+
+API_TOKEN = _init_token()
 
 _FORMULA_STORE = vw.FormulaStore(url="")
 _FORMULA_ENGINE = None
@@ -198,7 +216,7 @@ def build_state():
     _apply_server_quota(windows, applied_credits)
     # 行级折算率: 前端聚合/明细按模型折算 (v5 口径, 与总进度对账闭合)
     for r in rows:
-        r["rate"] = gw.rate_for(gw.norm_model(r.get("model") or ""), r.get("src"))
+        r["rate"] = 1.0 if r.get("official") else gw.rate_for(gw.norm_model(r.get("model") or ""), r.get("src"))
     # 其他账号(本地估算)金额合计: 进度类排除, 全部视图含
     other_cost = round(sum((r.get("cost") or 0.0) * r.get("rate", 1.0)
                            for r in rows if r.get("account") == "other"), 4)
@@ -457,7 +475,19 @@ def _apply_server_quota(windows, applied_credits=0):
         w["used"] = used
         w["limit"] = base
         w["pct"] = pct
-        w["reset"] = sw["reset_text"]
+        rt = sw.get("reset_text") or ""
+        reset_ms = None
+        try:
+            if rt.isdigit():
+                reset_ms = int(rt)
+            elif rt:
+                reset_ms = int(datetime.datetime.fromisoformat(
+                    rt.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            reset_ms = None
+        # 新版官方接口给的是 ISO 时间；转成 epoch ms 让前端显示实时倒计时
+        w["reset"] = reset_ms if reset_ms is not None else rt
+        w["reset_text"] = rt
         w["calibrated"] = True
 
 
@@ -564,6 +594,19 @@ def do_sync():
         return {"ok": False, "error": f"抓取失败: {e}"}
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error", "抓取失败")}
+    # 新版官方接口返回订阅周期起始；写入 config，供“本期(30d)”视图与月度窗口锚定
+    ps = (res.get("period_start") or "").strip()
+    if ps:
+        try:
+            cfg = gw.load_config()
+            cfg.setdefault("subscription", {})["start"] = ps.replace("Z", "+00:00")
+            gw.save_config(cfg)
+            # 刷新订阅周期缓存，让“本期/月度窗口”立即使用新锚点
+            _SUB_START["ms"] = gw.subscription_start_ms()
+            _SUB_START["source"] = "config"
+            _SUB_START["ts"] = time.time()
+        except Exception:
+            pass
     if ur is not None:
         try:
             r = ur.full_sync(cookie, ws, windows=res.get("windows"),
@@ -607,7 +650,7 @@ def do_grab():
             from urllib.request import Request, urlopen
             req = Request("https://opencode.ai/auth", headers={
                 "User-Agent": "Mozilla/5.0",
-                "Cookie": "auth=" + cookie,
+                "Cookie": gw.cookie_header(cookie),
             })
             try:
                 urlopen(req, timeout=10)
@@ -615,9 +658,11 @@ def do_grab():
                 loc = None
                 if isinstance(e, Exception) and hasattr(e, "headers"):
                     loc = e.headers.get("Location") or ""
-                m = __import__("re").search(r"/workspace/(wrk_[A-Za-z0-9]+)", str(loc))
+                m = __import__("re").search(
+                    r"/(?:workspace/(wrk_[A-Za-z0-9]+)|console/(org_[A-Za-z0-9]+))",
+                    str(loc))
                 if m:
-                    ws = m.group(1)
+                    ws = m.group(1) or m.group(2)
             if not ws:
                 ws = srv.get("workspace_id") or ""
     except Exception:
@@ -636,9 +681,9 @@ def _send_json(self, obj, code=200):
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     self.send_response(code)
     self.send_header("Content-Type", "application/json; charset=utf-8")
-    self.send_header("Access-Control-Allow-Origin", "*")
+    self.send_header("Access-Control-Allow-Origin", "null")
     self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Widget-Token")
     self.send_header("Content-Length", str(len(body)))
     self.end_headers()
     self.wfile.write(body)
@@ -647,6 +692,10 @@ def _send_json(self, obj, code=200):
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def _token_ok(self):
+        got = self.headers.get("X-Widget-Token") or ""
+        return bool(got) and secrets.compare_digest(got, API_TOKEN)
 
     def _read_body(self):
         try:
@@ -661,6 +710,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/") and path != "/api/health" and not self._token_ok():
+            _send_json(self, {"ok": False, "error": "unauthorized"}, 401)
+            return
         if path == "/api/state":
             now = time.time()
             with CACHE["lock"]:
@@ -674,7 +726,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.dumps(CACHE["state"], ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", "null")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -715,7 +767,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/health":
             body = b"ok"
             self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", "null")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -723,6 +775,9 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, {"ok": False, "error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._token_ok():
+            _send_json(self, {"ok": False, "error": "unauthorized"}, 401)
+            return
         path = self.path.split("?")[0]
         data = self._read_body()
         try:
@@ -763,9 +818,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", "null")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Widget-Token")
         self.end_headers()
 
 

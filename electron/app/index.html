@@ -417,6 +417,25 @@
 </div>
 
 <script>
+// 本地 API 鉴权：给所有发往 data_server 的请求自动附加 X-Widget-Token。
+// token 由 preload 从 runtime/token.txt 读取，网页无法伪造。
+(function () {
+  const API_ORIGIN = 'http://127.0.0.1:8765';
+  const rawFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.indexOf(API_ORIGIN) === 0) {
+      init = Object.assign({}, init);
+      const headers = new Headers(init.headers || {});
+      try {
+        const t = window.widgetAPI && window.widgetAPI.getToken && window.widgetAPI.getToken();
+        if (t) headers.set('X-Widget-Token', t);
+      } catch (_) { /* ignore */ }
+      init.headers = headers;
+    }
+    return rawFetch(input, init);
+  };
+})();
 const $ = (s) => document.querySelector(s);
 const money = (v) => v == null ? "—" : (v >= 1 ? "$" + v.toFixed(2) : (v >= 0.01 ? "$" + v.toFixed(3) : "$" + v.toFixed(4)));
 const countdown = (ms) => {
@@ -426,11 +445,32 @@ const countdown = (ms) => {
   const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
   return h + "时" + m + "分";
 };
+const resetTextOf = (w) => {
+  if (!w) return "";
+  const parseMs = (v) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v) {
+      const t = Date.parse(v);
+      if (!Number.isNaN(t)) return t;
+    }
+    return 0;
+  };
+  const ms = parseMs(w.reset) || parseMs(w.reset_text);
+  if (ms) return "重置 " + countdown(ms - Date.now());
+  return w.reset_text || "";
+};
 const resetLabel = (r) => {
   if (!r) return "";
-  if (typeof r.reset === "number") return "⏳ 重置: " + countdown(r.reset - Date.now()) + " 后";
-  if (r.reset_text) return "⏳ 重置: " + r.reset_text + " 后";
-  if (typeof r === "number") return "⏳ 重置: " + countdown(r - Date.now()) + " 后";
+  const parseMs = (v) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v) {
+      const t = Date.parse(v);
+      if (!Number.isNaN(t)) return t;
+    }
+    return 0;
+  };
+  const ms = parseMs(r.reset) || parseMs(r.reset_text) || (typeof r === "number" ? r : 0);
+  if (ms) return "⏳ 重置: " + countdown(ms - Date.now()) + " 后";
   return "";
 };
 const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];
@@ -576,7 +616,7 @@ function render() {
     const cur = win(state.mode);
     cl.textContent = periodName(state.mode);
     ca.textContent = Math.round(cur.pct) + "%";
-    const resetPart = cur.reset_text || (typeof cur.reset === "number" && cur.reset ? "重置 " + countdown(cur.reset - Date.now()) : "");
+    const resetPart = resetTextOf(cur);
     cs.textContent = (cur.used != null ? money(cur.used) + "/" + money(cur.limit) : "") + (resetPart ? " · " + resetPart : "");
   }
   fitAmount();
@@ -616,7 +656,7 @@ function renderSide() {
     if (!w) return;
     const div = document.createElement("div");
     div.className = "c-item" + (state.mode === k ? " active" : "");
-    const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
+    const resetPart = resetTextOf(w);
     div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${resetPart}</span>`;
     div.onclick = () => { state.mode = k; render(); };
     side.appendChild(div);
@@ -785,7 +825,7 @@ function renderLimits() {
     if (!w) return;
     const div = document.createElement("div");
     div.className = "l-card" + (state.mode === k ? " active" : "");
-    const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
+    const resetPart = resetTextOf(w);
     div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
     div.onclick = () => { state.mode = k; render(); };
     dl.appendChild(div);
@@ -1239,7 +1279,9 @@ function renderSmall() {
   const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
   const all = vAllAll ? vAllAll.totals : allAgg();
   const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
-  const rangeCost = rangeAgg.cost || 0;
+  const wSel = win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly");
+  // 有官方配额时，“总用量”用官方 used（与环形百分比同源），否则退回行级账单合计
+  const rangeCost = (wSel && wSel.calibrated && wSel.used != null) ? wSel.used : (rangeAgg.cost || 0);
   $("#sLabel").textContent = "总用量 · " + TIME_RANGE_LABEL[timeRange];
   $("#sAmount").textContent = money(rangeCost);
   const subCost = agg.cost || 0;
