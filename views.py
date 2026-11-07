@@ -428,7 +428,10 @@ class ViewEngine:
         scoped = self._scope_rows(rows, view.get("scope"))
         # 分账: 本期/7天/today 只算登录账号(官方); "全部"含其他账号(本地估算)
         if view.get("range") != "all":
-            scoped = [r for r in scoped if r.get("account") != "other"]
+            own = [r for r in scoped if r.get("account") != "other"]
+            # 未登录/无官方数据时本地记录全部标记为 other；此时不能把范围视图清空
+            if own:
+                scoped = own
         daily = {}
         for r in scoped:
             d = self._day(r["ts"])
@@ -439,7 +442,7 @@ class ViewEngine:
             to = tk.get("output", 0) or 0
             cache = tk.get("cache") or {}
             tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-            cost = (r.get("cost") or 0.0) * self.rate_for(r.get("model"), r.get("src"))
+            cost = (r.get("cost") or 0.0) * (1.0 if r.get("official") else self.rate_for(r.get("model"), r.get("src")))
             b = daily.setdefault(d, [0.0, 0, 0, 0, 0])
             b[0] += cost
             b[1] += 1

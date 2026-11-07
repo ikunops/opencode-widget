@@ -9,6 +9,13 @@ function debugSnap(msg) {
   try { fs.appendFileSync(SNAP_LOG, new Date().toISOString() + ' ' + msg + '\n'); } catch (_) { /* ignore */ }
 }
 
+// 本地 API token：由主进程读取，preload 通过同步 IPC 获取。
+const API_TOKEN_FILE = path.join(__dirname, '..', 'runtime', 'token.txt');
+function readApiToken() {
+  try { return fs.readFileSync(API_TOKEN_FILE, 'utf8').trim(); } catch (_) { return ''; }
+}
+ipcMain.on('get-api-token', (e) => { e.returnValue = readApiToken(); });
+
 // 登录态分区：持久化，登录一次后续免登录复用
 const LOGIN_PARTITION = 'persist:opencode-auth';
 let loginWin = null;
@@ -20,8 +27,10 @@ function opencodeAuthUrl() {
 async function readAuthCookieFromSession(ses) {
   try {
     const cookies = await ses.cookies.get({ url: 'https://opencode.ai' });
-    const auth = cookies.find(c => c.name === 'auth');
-    return auth ? auth.value : '';
+    // 新版 console 用 __Host-console_session；旧版用 auth。返回完整 name=value。
+    const c = cookies.find(x => x.name === '__Host-console_session')
+      || cookies.find(x => x.name === 'auth');
+    return c ? (c.name + '=' + c.value) : '';
   } catch (_) { return ''; }
 }
 
@@ -273,11 +282,12 @@ ipcMain.handle('grab-auth', async () => {
       if (settled || !loginWin || loginWin.isDestroyed()) return;
       try {
         const url = loginWin.webContents.getURL();
-        const m = /\/workspace\/(wrk_[A-Za-z0-9]+)/.exec(url);
+        const m = /\/(?:workspace\/(wrk_[A-Za-z0-9]+)|console\/(org_[A-Za-z0-9]+))/.exec(url);
         if (!m) return;
+        const workspaceId = m[1] || m[2];
         const cookie = await readAuthCookieFromSession(ses);
         if (!cookie) return;
-        settle({ ok: true, auth_cookie: cookie, workspace_id: m[1] });
+        settle({ ok: true, auth_cookie: cookie, workspace_id: workspaceId });
         setTimeout(() => { if (loginWin && !loginWin.isDestroyed()) loginWin.close(); }, 300);
       } catch (_) { /* 继续等待 */ }
     };

@@ -23,7 +23,14 @@ if os.path.exists(OUT):
 
 # ---------- 拉取 API ----------
 def fetch_state():
-    r = urllib.request.urlopen(API, timeout=15)
+    req = urllib.request.Request(API)
+    try:
+        token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime", "token.txt")
+        with open(token_path, "r", encoding="utf-8") as fh:
+            req.add_header("X-Widget-Token", fh.read().strip())
+    except Exception:
+        pass
+    r = urllib.request.urlopen(req, timeout=15)
     return json.loads(r.read().decode("utf-8"))
 
 # ---------- 读取桌面 widget.xlsx 模板（可选） ----------

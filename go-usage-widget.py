@@ -29,6 +29,7 @@ OPENCODE_AUTH = os.path.join(USERPROFILE, ".local", "share", "opencode", "auth.j
 GO_ENDPOINT = "https://opencode.ai/zen/go/v1/models"
 DASHBOARD_PREFIX = "https://opencode.ai/workspace/"
 DASHBOARD_SUFFIX = "/go"
+CONSOLE_API_BASE = "https://opencode.ai/console/api"
 DASH_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -52,6 +53,13 @@ def rate_for(model, src=None):
     if src and src != "go":
         return 1.0
     return MODEL_RATES.get(model, RATE_DEFAULT)
+
+
+def row_rate(r):
+    """行级折算率：官方 request-logs 的 cost 已是官方账单值，不再乘本地估算系数。"""
+    if r.get("official"):
+        return 1.0
+    return rate_for(norm_model(r.get("model") or ""), r.get("src"))
 
 
 def subscription_start_ms(override_ms=None):
@@ -411,16 +419,24 @@ def read_opencode_all(srcs=None):
         srcs = set(srcs)
     try:
         conn = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True, timeout=15)
-        cur = conn.execute(
-            "select data from message where json_valid(data) "
-            "and json_extract(data,'$.role')='assistant'"
-        )
+        # OpenCode v2 使用 session_message(type/data)；旧版使用 message(data.role)。
+        tables = {r[0] for r in conn.execute(
+            "select name from sqlite_master where type='table'")}
+        if "session_message" in tables:
+            cur = conn.execute(
+                "select data from session_message where type='assistant'")
+        else:
+            cur = conn.execute(
+                "select data from message where json_valid(data) "
+                "and json_extract(data,'$.role')='assistant'"
+            )
         for (data,) in cur:
             try:
                 d = json.loads(data)
             except Exception:
                 continue
-            pid = d.get("providerID")
+            model_info = d.get("model") if isinstance(d.get("model"), dict) else {}
+            pid = d.get("providerID") or model_info.get("providerID")
             if not pid:
                 continue
             # 动态供应商: 已知映射换成简名, 未知 providerID 原样保留 (自动发现新供应商)
@@ -439,7 +455,7 @@ def read_opencode_all(srcs=None):
             rows.append({
                 "ts": int(t),
                 "cost": float(cost) if isinstance(cost, (int, float)) else 0.0,
-                "model": d.get("modelID") or "?",
+                "model": d.get("modelID") or model_info.get("id") or "?",
                 "tokens": d.get("tokens") or {},
                 "src": src,
                 "dur_ms": dur_ms,
@@ -535,12 +551,12 @@ def build_windows(rows, now_ms, applied_credits=0, period_start=0):
             and r.get("account") != "other"
 
     def rated(r):
-        return r["cost"] * rate_for(norm_model(r["model"]), r.get("src"))
+        return r["cost"] * row_rate(r)
 
     costs = [(r["ts"], r["cost"] if r["cost"] is not None else 0.0) for r in rows]
     rated_costs = [(r["ts"], rated(r)) for r in rows if counted(r)]
     paid = [(t, c) for t, c in costs if c]
-    earliest = min((t for t, _ in paid), default=now_ms)
+    earliest = min((t for t, _ in paid), default=min((t for t, _ in costs), default=now_ms))
 
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
@@ -578,10 +594,14 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
     cost_map = cost_map or {}
     stats = {}
     rows = sorted(rows, key=lambda r: r.get("ts") or 0)
+    # 官方 request-logs 行自带官方 cost，展示时不再套用本地折算率
+    official_keys = {(norm_model(r.get("model") or ""), r.get("src") or "?")
+                     for r in rows if r.get("official")}
     session_start = now_ms - SESSION_MS
     ws, we = week_bounds(now_ms)
     paid_rows = [r for r in rows if r.get("cost")]
-    ms, me = month_bounds(now_ms, min((r["ts"] for r in paid_rows), default=now_ms))
+    ms, me = month_bounds(now_ms, min((r["ts"] for r in paid_rows),
+                                      default=min((r["ts"] for r in rows), default=now_ms)))
     # 先统计每个 (模型, 来源) 的总 cost: 该来源有付费记录判 go 组, 该来源完全无 cost 判 free
     # (按来源独立, 避免 go 的付费把 kilo/zen 同一模型的免费用量误判成付费, 如 hy3)
     cost_by_model = {}
@@ -729,7 +749,7 @@ def model_stats(rows, now_ms, cost_map=None, all_go_models=None):
             "model_quota": model_quota,
             "model_used": model_used,
             "model_remain": model_remain,
-            "meter_rate": rate_for(m, src),
+            "meter_rate": 1.0 if (m, src) in official_keys else rate_for(m, src),
             "sessions": s["sessions"],
             "prompts": s["prompts"],
             "days": len(s["days"]),
@@ -824,7 +844,7 @@ def model_history(rows, days=14):
         # 供应商只管自己的模型: 付费模型也按 (model, src, account) 分桶, 不再统一归 go
         key = (m, src, acct)
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
-        b[0] += (r["cost"] if r["cost"] is not None else 0.0) * rate_for(m, src)
+        b[0] += (r["cost"] if r["cost"] is not None else 0.0) * row_rate(r)
         b[1] += 1
         tk = r.get("tokens") or {}
         b[2] += tk.get("input", 0) or 0
@@ -866,7 +886,7 @@ def supplier_stats(rows):
         to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-        cost = (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
+        cost = (r.get("cost") or 0.0) * row_rate(r)
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         for key in (src, "all"):
             # 子集来源(如 gateway)登录账号是镜像防双计; 其他账号(account=other)独立消费保留
@@ -907,7 +927,7 @@ def heatmap(rows, days=None):
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
         b = buckets.setdefault((d, src, acct), [0.0, 0, 0, 0, 0])
-        b[0] += (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
+        b[0] += (r.get("cost") or 0.0) * row_rate(r)
         b[1] += 1
         b[2] += ti
         b[3] += to
@@ -919,15 +939,94 @@ def heatmap(rows, days=None):
     return out
 
 
+def cookie_header(value):
+    """把 auth_cookie 规范成 Cookie 请求头。
+
+    兼容三种存法：裸 token（旧版 auth）、'auth=token'、'__Host-console_session=token'（新版 console）。
+    """
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if "=" in v:
+        return v
+    return "auth=" + v
+
+
+def _json_get(url, cookie, org=None, timeout=12):
+    headers = {
+        "User-Agent": DASH_USER_AGENT,
+        "Accept": "application/json",
+        "Cookie": cookie_header(cookie),
+    }
+    if org:
+        headers["x-org-id"] = org
+    req = Request(url, headers=headers)
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def scrape_console_usage(auth_cookie, org_id, timeout=12):
+    """新版 opencode.ai/console 官方配额（2026-11 起）。
+
+    GET /console/api/go/status，需 header `x-org-id: org_xxx`。
+    meters.fiveHour/week/month 的金额单位是 microCents（1e8 = $1）。
+    """
+    try:
+        data = _json_get(CONSOLE_API_BASE + "/go/status", auth_cookie, org_id, timeout)
+    except Exception as e:
+        return {"ok": False, "error": "请求官方配额失败: %s" % e}
+
+    access = data.get("access") or {}
+    meters = access.get("meters") or {}
+    if not isinstance(meters, dict) or not meters:
+        return {"ok": False, "error": "官方响应中未找到 meters（cookie 可能失效）"}
+
+    windows = []
+    for kind, key, label in (("session", "fiveHour", "滚动 5h"),
+                             ("weekly", "week", "每周"),
+                             ("monthly", "month", "每月")):
+        m = meters.get(key)
+        if not isinstance(m, dict):
+            continue
+        try:
+            limit = float(m.get("limitMicroCents") or 0) / 1e8
+            used = float(m.get("usedMicroCents") or 0) / 1e8
+        except Exception:
+            continue
+        pct = min(100.0, max(0.0, used / limit * 100.0)) if limit else 0.0
+        windows.append({
+            "kind": kind,
+            "label": label,
+            "pct": round(pct, 2),
+            "reset_text": m.get("resetsAt") or "",
+            "limit": round(limit, 2),
+            "used": round(used, 4),
+        })
+    if not windows:
+        return {"ok": False, "error": "未能解析官方用量窗口"}
+    windows.sort(key=lambda w: {"session": 0, "weekly": 1, "monthly": 2}.get(w["kind"], 9))
+    return {
+        "ok": True,
+        "windows": windows,
+        "workspace_id": org_id,
+        "period_start": access.get("startsAt") or "",
+        "applied_credits": 0,
+        "applied_dollars": 0.0,
+    }
+
+
 def scrape_server_usage(auth_cookie, workspace_id, timeout=12):
     if not auth_cookie or not workspace_id:
         return {"ok": False, "error": "缺少 auth cookie 或 workspace ID"}
+    # 新版 console: workspace_id 是 org_xxx，直接走 JSON API
+    if workspace_id.startswith("org_"):
+        return scrape_console_usage(auth_cookie, workspace_id, timeout)
     url = f"{DASHBOARD_PREFIX}{workspace_id}{DASHBOARD_SUFFIX}"
     try:
         req = Request(url, headers={
             "User-Agent": DASH_USER_AGENT,
             "Accept": "text/html",
-            "Cookie": f"auth={auth_cookie}",
+            "Cookie": cookie_header(auth_cookie),
         })
         with urlopen(req, timeout=timeout) as resp:
             html = resp.read().decode("utf-8", errors="replace")

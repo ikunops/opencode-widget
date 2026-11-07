@@ -10,7 +10,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_DB = os.path.join(APP_DIR, "usage_remote.db")
@@ -446,13 +446,15 @@ def read_remote_rows():
                 "cache": {"read": tcr or 0, "write": (tcw5 or 0) + (tcw1 or 0)},
                 "reasoning": treas or 0,
             }
-            src = "go" if (provider or "").startswith("inf-go") else "zen"
+            p = (provider or "").lower()
+            src = "go" if (p.startswith("inf-go") or p in ("opencode-go", "opencode_go")) else "zen"
             rows.append({
                 "ts": ts,
                 "cost": (cost or 0) / 1e8,
                 "model": model,
                 "tokens": tokens,
                 "src": src,
+                "official": True,
                 "key_id": key_id or "",
             })
         conn.close()
@@ -547,26 +549,158 @@ def fetch_subscription_start(auth_cookie, workspace_id, timeout=15):
 
 
 # ---------------------------------------------------------------------------
+# 新版 console: request-logs 明细同步
+# ---------------------------------------------------------------------------
+CONSOLE_API_BASE = "https://opencode.ai/console/api"
+REQUEST_LOG_PAGE = 100
+REQUEST_LOG_RETENTION_MS = 30 * 86400 * 1000
+
+
+def _cookie_header(value):
+    v = (value or "").strip()
+    if not v:
+        return ""
+    return v if "=" in v else "auth=" + v
+
+
+def _console_get(path, auth_cookie, org_id, timeout=30, retries=3):
+    last = None
+    for attempt in range(retries):
+        try:
+            req = Request(CONSOLE_API_BASE + path, headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "Cookie": _cookie_header(auth_cookie),
+                "x-org-id": org_id,
+            })
+            with urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception as e:
+            last = e
+            code = getattr(e, "code", None)
+            if code and 400 <= code < 500:
+                break
+            if attempt + 1 < retries:
+                time.sleep(1.5 * (attempt + 1))
+    raise last
+
+
+def sync_request_logs(conn, auth_cookie, workspace_id, since_ms=None):
+    """同步新版 console 的推理请求明细到 usage_records。
+
+    接口: GET /console/api/request-logs?category=inference&limit=100&since=<ms>&cursor=<nextCursor>
+    返回的 cost 是美元浮点数；usage_records.cost 存 1e-8 美元整数（read_remote_rows 会 /1e8）。
+    增量: 以 sync_meta.last_request_log_ts 为水位，重叠 10 分钟；首次回溯 30 天（官方保留期）。
+    """
+    if not auth_cookie or not workspace_id:
+        return 0
+    now = _now_ms()
+    since = now - REQUEST_LOG_RETENTION_MS
+    if since_ms:
+        since = max(since, int(since_ms))
+    try:
+        last = int(get_sync_meta(conn, "last_request_log_ts") or 0)
+    except Exception:
+        last = 0
+    if last:
+        since = max(since, last - 10 * 60 * 1000)
+
+    total = 0
+    cursor = None
+    pages = 0
+    saw_items = False
+    while pages < 500:
+        params = {"category": "inference", "limit": REQUEST_LOG_PAGE, "since": int(since)}
+        if cursor:
+            params["cursor"] = cursor
+        data = _console_get("/request-logs?" + urlencode(params), auth_cookie, workspace_id)
+        items = data.get("items") or []
+        if not items:
+            break
+        saw_items = True
+        fetched_at = _now_ms()
+        for it in items:
+            try:
+                rid = it.get("id") or it.get("requestID")
+                if not rid:
+                    continue
+                # 只统计成功的推理；失败/取消/拒绝的请求不计入用量
+                outcome = str(it.get("outcome") or "").lower()
+                status = it.get("statusCode")
+                if outcome and outcome != "succeeded":
+                    continue
+                if isinstance(status, int) and status >= 400:
+                    continue
+                cost = it.get("cost")
+                cost_int = int(round(float(cost) * 1e8)) if isinstance(cost, (int, float)) else 0
+                product = str(it.get("product") or "").lower()
+                path = str(it.get("path") or "")
+                provider = str(it.get("provider") or "")
+                if product == "go" or path.startswith("/inference/go/") or provider.lower() in ("opencode-go", "opencode_go"):
+                    provider = "inf-go"
+                elif not provider:
+                    provider = "opencode"
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO usage_records (id, workspace_id, time_created, time_updated, "
+                    "model, provider, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, "
+                    "cache_write_5m_tokens, cache_write_1h_tokens, cost, key_id, session_id, fetched_at, sync_ts) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rid, workspace_id,
+                     it.get("startedAt"), it.get("finishedAt") or it.get("startedAt"),
+                     it.get("model"), provider,
+                     it.get("inputTokens"), it.get("outputTokens"), it.get("reasoningTokens"),
+                     it.get("cacheReadTokens"), it.get("cacheWriteTokens"), 0,
+                     cost_int, "", it.get("sessionID"), fetched_at, fetched_at))
+                try:
+                    total += cur.rowcount or 0
+                except Exception:
+                    total += 1
+            except Exception:
+                pass
+        conn.commit()
+        cursor = data.get("nextCursor")
+        pages += 1
+        if not cursor:
+            break
+    if saw_items:
+        set_sync_meta(conn, "last_request_log_ts", str(now))
+        set_sync_meta(conn, "last_sync_ts", str(now))
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Full sync entry
 # ---------------------------------------------------------------------------
 def full_sync(auth_cookie, workspace_id, windows=None, applied_credits=None):
     """一次性全量同步：usage.list + getCosts + quota。返回摘要 dict。"""
-    result = {"usage_list": 0, "costs": 0, "quota": 0, "errors": []}
+    result = {"usage_list": 0, "costs": 0, "quota": 0, "request_logs": 0, "errors": []}
     if not auth_cookie or not workspace_id:
         result["errors"].append("缺少 auth cookie 或 workspace ID")
         return result
     conn = init_remote_db()
+    # 新版 console (org_xxx) 没有旧的 usage.list / getCosts 端点，改抓 request-logs + quota
+    legacy = not str(workspace_id).startswith("org_")
+    if legacy:
+        try:
+            result["usage_list"] = sync_usage_list(conn, auth_cookie, workspace_id, full=True)
+        except Exception as e:
+            result["errors"].append("usage_list: %s" % e)
+        try:
+            result["costs"] = sync_costs(conn, auth_cookie, workspace_id)
+        except Exception as e:
+            result["errors"].append("costs: %s" % e)
+    else:
+        try:
+            result["request_logs"] = sync_request_logs(conn, auth_cookie, workspace_id)
+        except Exception as e:
+            result["errors"].append("request_logs: %s" % e)
     try:
-        n = sync_usage_list(conn, auth_cookie, workspace_id, full=True)
-        result["usage_list"] = n
-        n = sync_costs(conn, auth_cookie, workspace_id)
-        result["costs"] = n
         if windows:
             result["quota"] = sync_quota_snapshot(conn, windows, workspace_id)
         if applied_credits is not None:
             set_sync_meta(conn, "applied_credits", applied_credits)
     except Exception as e:
-        result["errors"].append(str(e))
+        result["errors"].append("quota: %s" % e)
     finally:
         conn.close()
     return result
