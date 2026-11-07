@@ -28,6 +28,7 @@ async function readAuthCookieFromSession(ses) {
 const SIZES = {
   small: [540, 260],
   mid: [560, 480],
+  micro: [380, 220],
   large: [960, 720],
 };
 

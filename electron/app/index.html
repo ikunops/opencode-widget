@@ -149,6 +149,55 @@
   .small .s-grid { font-size: 10px; grid-template-columns: 1fr; gap: 3px; margin-top: auto; }
   footer .s-hint { flex: 1; text-align: center; }
 
+  /* ---- micro (超紧凑 380x220: 面积约为上一版 micro 的一半, 保留全部数据) ---- */
+  .app.micro { --radius: 12px; }
+  .micro header { padding: 2px 6px 0; }
+  .micro .brand { gap: 4px; }
+  .micro .mark { width: 12px; height: 12px; border-radius: 4px; font-size: 7px; }
+  .micro .title { font-size: 9px; }
+  .micro .op-wrap { display: none; }
+  .micro .status { font-size: 7.5px; gap: 3px; }
+  .micro .dot { width: 5px; height: 5px; }
+  .micro .win-btns { gap: 2px; margin-left: 4px; }
+  .micro .wb { width: 16px; height: 16px; border-radius: 5px; font-size: 8.5px; }
+  .micro .main { padding: 0 6px; }
+  .micro .c-top { gap: 6px; padding: 0; }
+  .micro .ringbox { width: 70px; height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  .micro .ringbox svg { position: static; width: 52px; height: 52px; flex-shrink: 0; }
+  .micro .ring { stroke-width: 7; }
+  .micro .ring-badge { display: none; }
+  .micro .rc { position: static; width: auto; height: auto; display: flex; flex-direction: column; align-items: center; }
+  .micro .rc .label { position: static; transform: none; margin: 0; font-size: 6px; letter-spacing: 0.4px; }
+  .micro .rc .amount { position: static; transform: none; font-size: 13px; line-height: 1.1; }
+  .micro .ring-sub { position: static; top: auto; left: auto; width: auto; font-size: 6px; margin-top: 1px; }
+  .micro .c-side { gap: 4px; padding-top: 0; justify-content: center; }
+  .micro .c-item { position: relative; justify-content: flex-start; gap: 4px; padding: 1px 3px 4px; font-size: 8px; border-radius: 4px; }
+  .micro .c-item .sw { width: 5px; height: 5px; }
+  .micro .c-item .nm { min-width: 24px; }
+  .micro .c-item .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; margin: 0; border-radius: 1px; }
+  .micro .c-item .pv { margin-left: auto; min-width: 26px; font-size: 8px; }
+  .micro .c-item .rs { margin-left: 6px; min-width: 40px; font-size: 6.8px; }
+  .micro .c-tabs { gap: 3px; padding: 0; }
+  .micro .tab { padding: 2px 0; font-size: 8px; border-radius: 4px; }
+  .micro .m-head { flex-direction: row; align-items: center; gap: 4px; padding: 0 0 2px; }
+  .micro .m-head-top { flex: 1; gap: 0; }
+  .micro .m-head-bar { flex: 0 0 auto; gap: 4px; }
+  .micro .m-title { font-size: 7.2px; letter-spacing: 0.3px; }
+  .micro .m-count { font-size: 7.2px; }
+  .micro .m-filters { padding: 0; border-radius: 4px; }
+  .micro .f-btn { font-size: 7px; padding: 1px 3px; border-radius: 3px; }
+  .micro .unit-btn { font-size: 7px; padding: 1px 3px; border-radius: 3px; }
+  .micro .m-list { gap: 0; }
+  .micro .m-item { position: relative; justify-content: flex-start; padding: 2px 4px 4px; font-size: 8.5px; border-radius: 4px; }
+  .micro .m-item .nm { min-width: 62px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .micro .m-item .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; margin: 0; border-radius: 1px; }
+  .micro .m-item .cnt { margin-left: auto; font-size: 7.5px; min-width: 28px; }
+  .micro .m-item .sub { font-size: 7px; margin-left: 3px; }
+  .micro .m-item .rem { font-size: 7px; margin-left: 3px; }
+  .micro footer { padding: 2px 6px 3px; font-size: 7px; }
+  .micro footer .s-hint { display: none; }
+  .micro footer #footLeft { max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .dash.on { display: flex; }
@@ -252,6 +301,7 @@
       </div>
       <div class="status"><span class="dot" id="keyDot"></span><span id="keyText">…</span></div>
       <div class="win-btns">
+        <button class="wb" id="btnCompact" title="紧凑视图 (M)">▤</button>
         <button class="wb" id="btnMin" title="收起">─</button>
         <button class="wb" id="btnExpand" title="展开">□</button>
         <button class="wb close" id="btnClose" title="关闭">×</button>
@@ -571,11 +621,11 @@ function render() {
     const total = (m && m.used) || 0;
     ca.textContent = total ? money(total) : "—";
     const hot = [s, w, m].reduce((a, b) => a.pct > b.pct ? a : b);
-    cs.textContent = "最高 " + periodName(hot.kind) + " " + Math.round(hot.pct) + "%";
+    cs.textContent = "最高 " + periodName(hot.kind) + " " + fmtPct(hot.pct);
   } else {
     const cur = win(state.mode);
     cl.textContent = periodName(state.mode);
-    ca.textContent = Math.round(cur.pct) + "%";
+    ca.textContent = fmtPct(cur.pct);
     const resetPart = cur.reset_text || (typeof cur.reset === "number" && cur.reset ? "重置 " + countdown(cur.reset - Date.now()) : "");
     cs.textContent = (cur.used != null ? money(cur.used) + "/" + money(cur.limit) : "") + (resetPart ? " · " + resetPart : "");
   }
@@ -617,7 +667,7 @@ function renderSide() {
     const div = document.createElement("div");
     div.className = "c-item" + (state.mode === k ? " active" : "");
     const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
-    div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${resetPart}</span>`;
+    div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${fmtPct(w.pct)}</span><span class="rs">${resetPart}</span>`;
     div.onclick = () => { state.mode = k; render(); };
     side.appendChild(div);
   });
@@ -786,7 +836,7 @@ function renderLimits() {
     const div = document.createElement("div");
     div.className = "l-card" + (state.mode === k ? " active" : "");
     const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
-    div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
+    div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${fmtPct(w.pct)}</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
     div.onclick = () => { state.mode = k; render(); };
     dl.appendChild(div);
   });
@@ -1493,14 +1543,17 @@ function setUiState(v, noResize, manual) {
   }
   uiState = v;
   const onLarge = v === "large";
+  const onMicro = v === "micro";
   $("#btnExpand").classList.toggle("on", onLarge);
   $("#btnExpand").textContent = onLarge ? "▣" : "□";
+  $("#btnCompact").classList.toggle("on", onMicro);
+  $("#btnCompact").textContent = onMicro ? "▥" : "▤";
+  const appEl = document.querySelector(".app");
+  if (appEl) appEl.classList.toggle("micro", onMicro);
   $("#smallView").classList.toggle("on", v === "small");
-  $("#compactView").style.display = v === "mid" ? "flex" : "none";
+  $("#compactView").style.display = (v === "mid" || onMicro) ? "flex" : "none";
   $("#dashView").classList.toggle("on", onLarge);
-  if (!noResize) {
-    window.widgetAPI.resize(v === "small" ? "small" : (onLarge ? "large" : "mid"));
-  }
+  if (!noResize) window.widgetAPI.resize(v);
   try { localStorage.setItem("uiState", v); window.widgetAPI.saveUiState(v); } catch (_) {}
   setTimeout(() => render(), 250);
 }
@@ -1547,7 +1600,8 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 async function initExpanded() {
   try {
-    setUiState("mid");
+    const saved = localStorage.getItem("uiState");
+    setUiState(saved === "micro" || saved === "large" ? saved : "mid");
   } catch (_) {}
 }
 
@@ -1607,6 +1661,7 @@ async function doGrab() {
 
 
 $("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small", false, true);
+$("#btnCompact").onclick = () => setUiState(uiState === "micro" ? "mid" : "micro", false, true);
 $("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large", false, true);
 $("#btnClose").onclick = () => window.widgetAPI.quit();
 
@@ -1650,6 +1705,8 @@ selModel = keys[ni % keys.length];
 render();
 }
 document.addEventListener("keydown", (e) => {
+  const tag = ((e.target && e.target.tagName) || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
   if (e.key === "Tab") {
     if (uiState !== "mid") cycleSupplier(1);
     e.preventDefault();
@@ -1658,6 +1715,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "x" || e.key === "X") {
     timeRange = TIME_RANGE_ORDER[(TIME_RANGE_ORDER.indexOf(timeRange) + 1) % TIME_RANGE_ORDER.length];
     saveViewPrefs(); render();
+    e.preventDefault();
+    return;
+  }
+  if (e.key === "m" || e.key === "M") {
+    setUiState(uiState === "micro" ? "mid" : "micro", false, true);
     e.preventDefault();
     return;
   }
@@ -1788,7 +1850,7 @@ window.widgetAPI.onSnapRestore((s) => {
   // 先关穿透恢复完整交互，再切 UI 状态（主进程已负责 resize，此处 noResize）
   snapMode = false;
   window.widgetAPI.setClickThrough(false);
-  const t = s === "large" || s === "small" ? s : "mid";
+  const t = ["large", "small", "micro"].includes(s) ? s : "mid";
   if (uiState !== t) setUiState(t, true);
 });
 initOpacity();
